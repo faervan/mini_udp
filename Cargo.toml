@@ -1,0 +1,20 @@
+[workspace]
+members = ["mini_udp", "derive"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["faervan <faervan@proton.me>"]
+
+[workspace.dependencies]
+mini_udp_derive.path = "derive"
+
+crc = "3.4"
+thiserror = "2"
+rand = "0.10"
+
+# Proc macro libs
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = "2.0"

@@ -1,0 +1,12 @@
+[package]
+name = "mini_udp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+mini_udp_derive.workspace = true
+
+crc.workspace = true
+thiserror.workspace = true
+rand.workspace = true

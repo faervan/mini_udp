@@ -1,0 +1,10 @@
+[package]
+name = "mini_udp_derive"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
