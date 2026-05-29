@@ -6,8 +6,8 @@ pub trait BitRepr: Sized {
     const MIN_BIT_LEN: usize;
     const MAX_BIT_LEN: usize;
     fn bit_len(&self) -> usize;
-    fn write_to_bytes(&self, bytes: &mut [u8], bit_offset: u8) -> Result<(), BitReprError>;
-    fn from_bytes(bytes: &[u8], bit_offset: u8) -> Result<Self, BitReprError>;
+    fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), BitReprError>;
+    fn from_bytes(bytes: &[u8]) -> Result<Self, BitReprError>;
 }
 
 #[derive(Error, Debug)]
