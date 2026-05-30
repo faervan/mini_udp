@@ -44,10 +44,33 @@ impl DataValue {
         let value = self.quote_identifier(false);
         match self.kind {
             DataValueKind::U8 => {
+                let byte = *byte_offset;
                 *byte_offset += 1;
                 quote! {
-                    if let Some(byte) = bytes.get_mut(#byte_offset) {
+                    if let Some(byte) = bytes.get_mut(#byte) {
                         *byte = *#value;
+                    } else {
+                        return Err(::mini_udp::BitReprError::SliceTooShort);
+                    }
+                }
+            }
+            DataValueKind::F32 => {
+                let start = *byte_offset;
+                *byte_offset += 4;
+                quote! {
+                    if let Some(slice) = bytes.get_mut(#start..#byte_offset) {
+                        slice.copy_from_slice(&#value.to_le_bytes());
+                    } else {
+                        return Err(::mini_udp::BitReprError::SliceTooShort);
+                    }
+                }
+            }
+            DataValueKind::F64 => {
+                let start = *byte_offset;
+                *byte_offset += 8;
+                quote! {
+                    if let Some(slice) = bytes.get_mut(#start..#byte_offset) {
+                        slice.copy_from_slice(&#value.to_le_bytes());
                     } else {
                         return Err(::mini_udp::BitReprError::SliceTooShort);
                     }
@@ -60,10 +83,33 @@ impl DataValue {
     pub fn quote_from_bytes(&self, byte_offset: &mut usize) -> TokenStream2 {
         let value = match self.kind {
             DataValueKind::U8 => {
+                let byte = *byte_offset;
                 *byte_offset += 1;
                 quote! {
-                    if let Some(byte) = bytes.get(#byte_offset) {
+                    if let Some(byte) = bytes.get(#byte) {
                         *byte
+                    } else {
+                        return Err(::mini_udp::BitReprError::SliceTooShort);
+                    }
+                }
+            }
+            DataValueKind::F32 => {
+                let start = *byte_offset;
+                *byte_offset += 4;
+                quote! {
+                    if let Ok(slice) = TryInto::<[u8; 4]>::try_into(&bytes[#start..#byte_offset]) {
+                        f32::from_le_bytes(slice)
+                    } else {
+                        return Err(::mini_udp::BitReprError::SliceTooShort);
+                    }
+                }
+            }
+            DataValueKind::F64 => {
+                let start = *byte_offset;
+                *byte_offset += 8;
+                quote! {
+                    if let Ok(slice) = TryInto::<[u8; 8]>::try_into(&bytes[#start..#byte_offset]) {
+                        f64::from_le_bytes(slice)
                     } else {
                         return Err(::mini_udp::BitReprError::SliceTooShort);
                     }
