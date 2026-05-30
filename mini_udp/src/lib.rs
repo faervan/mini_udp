@@ -67,7 +67,7 @@ mod test {
         struct C();
         #[derive(BitRepr, PartialEq, Debug)]
         struct D {
-            byte: u8,
+            byte: i8,
         }
         #[derive(BitRepr, PartialEq, Debug)]
         struct E(u8);
@@ -83,7 +83,10 @@ mod test {
         crate::test_bitrepr_roundtrip!(a, A, A {});
         crate::test_bitrepr_roundtrip!(b, B, B);
         crate::test_bitrepr_roundtrip!(c, C, C());
-        crate::test_bitrepr_roundtrip!(d, D, D { byte: 5 });
+        crate::test_bitrepr_roundtrip!(d, D, D { byte: 0 });
+        crate::test_bitrepr_roundtrip!(d, D, D { byte: -128 });
+        crate::test_bitrepr_roundtrip!(d, D, D { byte: -1 });
+        crate::test_bitrepr_roundtrip!(d, D, D { byte: 127 });
         crate::test_bitrepr_roundtrip!(e, E, E(249));
         crate::test_bitrepr_roundtrip!(
             f,

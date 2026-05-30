@@ -54,6 +54,17 @@ impl DataValue {
                     }
                 }
             }
+            DataValueKind::I8 => {
+                let byte = *byte_offset;
+                *byte_offset += 1;
+                quote! {
+                    if let Some(byte) = bytes.get_mut(#byte) {
+                        *byte = *#value as u8;
+                    } else {
+                        return Err(::mini_udp::BitReprError::SliceTooShort);
+                    }
+                }
+            }
             DataValueKind::F32 => {
                 let start = *byte_offset;
                 *byte_offset += 4;
@@ -88,6 +99,17 @@ impl DataValue {
                 quote! {
                     if let Some(byte) = bytes.get(#byte) {
                         *byte
+                    } else {
+                        return Err(::mini_udp::BitReprError::SliceTooShort);
+                    }
+                }
+            }
+            DataValueKind::I8 => {
+                let byte = *byte_offset;
+                *byte_offset += 1;
+                quote! {
+                    if let Some(byte) = bytes.get(#byte) {
+                        *byte as i8
                     } else {
                         return Err(::mini_udp::BitReprError::SliceTooShort);
                     }
