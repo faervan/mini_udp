@@ -97,6 +97,39 @@ mod test {
         crate::test_bitrepr_roundtrip!(g, G, G(2, 1));
     }
 
+    #[test]
+    fn enum_roundtrip() {
+        #[derive(BitRepr, PartialEq, Debug)]
+        enum A {
+            B,
+        }
+        #[derive(BitRepr, PartialEq, Debug)]
+        enum B {
+            A,
+            B,
+            C,
+        }
+        #[derive(BitRepr, PartialEq, Debug)]
+        enum C {
+            B(u8),
+            C { byte0: u8, byte1: u8 },
+            D,
+        }
+
+        crate::test_bitrepr_roundtrip!(a, A, A::B);
+        crate::test_bitrepr_roundtrip!(b, B, B::B);
+        crate::test_bitrepr_roundtrip!(c, C, C::B(129));
+        crate::test_bitrepr_roundtrip!(c, C, C::D);
+        crate::test_bitrepr_roundtrip!(
+            c,
+            C,
+            C::C {
+                byte0: 0,
+                byte1: 255
+            }
+        );
+    }
+
     #[macro_export]
     macro_rules! test_bitrepr_roundtrip {
         ($binding:ident, $ty:ident, $init:expr) => {

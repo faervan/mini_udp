@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{ToTokens as _, quote};
-use syn::{DeriveInput, parse_macro_input, spanned::Spanned};
+use syn::{DeriveInput, parse_macro_input};
 
 use crate::data::DataValue;
 
@@ -58,7 +58,7 @@ struct BitReprImpl {
 }
 
 fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<BitReprImpl, TokenStream> {
-    let values = DataValueGroup::new(&data.fields, ident, false, 0);
+    let values = DataValueGroup::new(&data.fields, ident, None, 0);
     let to_bytes = values.quote_to_bytes();
     let from_bytes = values.quote_from_bytes();
 
@@ -79,24 +79,6 @@ fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<BitReprIm
 fn impl_for_enum(data: syn::DataEnum) -> Result<BitReprImpl, TokenStream> {
     let mut min_field_len = usize::MAX;
     let mut max_field_len = 0;
-    let variants = data
-        .variants
-        .iter()
-        .map(|variant| FieldBitReprImpl::new(&variant.ident, &variant.fields))
-        .collect::<Result<Vec<_>, TokenStream>>()?;
-    for variant in &variants {
-        min_field_len = min_field_len.min(variant.size);
-        max_field_len = max_field_len.max(variant.size);
-    }
-    if let Some(variant) = data.variants.iter().find(|v| !v.fields.is_empty()) {
-        return Err(compile_error(
-            variant.span(),
-            format!(
-                "variant {} has fields: min enum len: {min_field_len}, max enum len: {max_field_len}",
-                variant.ident
-            ),
-        ));
-    }
     let data_access_type = match data.variants.len() {
         0 => {
             return Err(compile_error(
@@ -110,20 +92,35 @@ fn impl_for_enum(data: syn::DataEnum) -> Result<BitReprImpl, TokenStream> {
         _ => return Err(compile_error(data.enum_token.span, "What are you doing?")),
     };
     let data_type_str = data_access_type.as_str();
-    let mut match_to_bytes = quote! {};
-    let mut match_from_bytes = quote! {};
-    for (i, v) in data.variants.iter().enumerate() {
-        let variant = v.clone();
-        let i = syn::LitInt::new(&format!("{i}{data_type_str}"), Span::call_site());
-        match_to_bytes = quote! {
-            #match_to_bytes
-            Self::#variant => #i,
-        };
-        match_from_bytes = quote! {
-            #match_from_bytes
-            #i => Self::#variant,
-        };
+    let variants = data
+        .variants
+        .iter()
+        .enumerate()
+        .map(|(id, variant)| {
+            let id = syn::LitInt::new(&format!("{id}{data_type_str}"), Span::mixed_site());
+            DataValueGroup::new(&variant.fields, variant.ident.clone(), Some(id), 1)
+        })
+        .collect::<Vec<_>>();
+    for variant in &variants {
+        min_field_len = min_field_len.min(variant.min_size());
+        max_field_len = max_field_len.max(variant.max_size());
     }
+    let match_to_bytes: TokenStream2 = variants
+        .iter()
+        .map(|v| {
+            let variant = v.quote_to_bytes();
+            quote! {Self::#variant}
+        })
+        .collect();
+    let match_from_bytes: TokenStream2 = variants
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let variant = v.quote_from_bytes();
+            let i = syn::LitInt::new(&format!("{i}{data_type_str}"), Span::mixed_site());
+            quote! {#i => Self::#variant,}
+        })
+        .collect();
 
     let bytes_ident = quote! {bytes};
     let data_access_mut = DataAccess {
@@ -227,85 +224,13 @@ impl DataAccessType {
     }
 }
 
-struct FieldBitReprImpl {
-    size: usize,
-    f_write_to_bytes: TokenStream2,
-    f_from_bytes: TokenStream2,
-}
-
-impl FieldBitReprImpl {
-    fn new(ident: &syn::Ident, fields: &syn::Fields) -> Result<Self, TokenStream> {
-        let size = get_fields_size(fields)?;
-        let f_write_to_bytes = quote! {todo!()};
-        let f_from_bytes = quote! {todo!()};
-        Ok(Self {
-            size,
-            f_write_to_bytes,
-            f_from_bytes,
-        })
-    }
-}
-
-fn get_fields_size(fields: &syn::Fields) -> Result<usize, TokenStream> {
-    let fields = match fields {
-        syn::Fields::Unit => return Ok(0),
-        syn::Fields::Named(fields) => &fields.named,
-        syn::Fields::Unnamed(fields) => &fields.unnamed,
-    };
-    let mut size = 0;
-    for field in fields {
-        size += get_type_size(&field.ty)?;
-    }
-    Ok(size)
-}
-
-fn get_type_size(ty: &syn::Type) -> Result<usize, TokenStream> {
-    match ty {
-        syn::Type::Path(path) => path
-            .path
-            .get_ident()
-            .and_then(get_type_path_size)
-            .ok_or_else(|| compile_error(ty.span(), "Type not yet supported for derived BitRepr")),
-        _ => Err(compile_error(
-            ty.span(),
-            "Type not yet supported for derived BitRepr",
-        )),
-    }
-}
-
-fn get_type_path_size(ident: &syn::Ident) -> Option<usize> {
-    Some(match ident.to_string().as_str() {
-        "bool" => 1,
-        "u8" | "i8" => 8,
-        "u16" | "i16" => 16,
-        "u32" | "i32" | "f32" => 32,
-        "u64" | "i64" | "f64" => 64,
-        "u128" | "i128" => 128,
-        #[cfg(target_pointer_width = "32")]
-        "usize" | "isize" => 32,
-        #[cfg(target_pointer_width = "64")]
-        "usize" | "isize" => 64,
-        _ => return None,
-    })
-}
-
-fn surround_fields(fields: &syn::Fields, inner: TokenStream2) -> TokenStream2 {
-    match fields {
-        syn::Fields::Unit => inner,
-        syn::Fields::Unnamed(_) => quote! {(#inner)},
-        syn::Fields::Named(_) => quote! {{
-            #inner
-        }},
-    }
-}
-
-/// Represents a struct, union or enum variant
+/// Represents a struct or enum variant
 struct DataValueGroup {
-    /// should be an enum not a bool, whatever
+    /// should probably be an enum, whatever
     is_named: bool,
-    /// should be an enum not a bool, whatever
-    is_union: bool,
-    is_enum_variant: bool,
+    /// should probably be an enum, whatever
+    is_unit: bool,
+    enum_variant_id: Option<syn::LitInt>,
     byte_offset: usize,
     ident: syn::Ident,
     values: Vec<DataValue>,
@@ -315,19 +240,21 @@ impl DataValueGroup {
     fn new(
         fields: &syn::Fields,
         ident: syn::Ident,
-        is_enum_variant: bool,
+        enum_variant_id: Option<syn::LitInt>,
         byte_offset: usize,
     ) -> Self {
         let mut values = vec![];
-        let (is_named, is_union) = match fields {
-            syn::Fields::Unit => (false, true),
+        let mut is_named = false;
+        let mut is_unit = false;
+        match fields {
+            syn::Fields::Unit => is_unit = true,
             syn::Fields::Named(fields) => {
                 values = fields
                     .named
                     .iter()
                     .map(|field| DataValue::from_field(field, None))
                     .collect();
-                (true, false)
+                is_named = true;
             }
             syn::Fields::Unnamed(fields) => {
                 values = fields
@@ -336,13 +263,12 @@ impl DataValueGroup {
                     .enumerate()
                     .map(|(index, field)| DataValue::from_field(field, Some(index)))
                     .collect();
-                (false, false)
             }
         };
         Self {
             is_named,
-            is_union,
-            is_enum_variant,
+            is_unit,
+            enum_variant_id,
             byte_offset,
             ident,
             values,
@@ -350,9 +276,6 @@ impl DataValueGroup {
     }
 
     fn quote_to_bytes(&self) -> TokenStream2 {
-        if self.is_union {
-            return quote! {};
-        }
         let mut byte_offset = self.byte_offset;
         let write_to_bytes: TokenStream2 = self
             .values
@@ -368,17 +291,19 @@ impl DataValueGroup {
             })
             .collect();
         let ident = self.ident.to_token_stream();
-        let binding = match self.is_named {
-            true => quote! {#ident { #fields }},
-            false => quote! {#ident ( #fields )},
+        let binding = match (self.is_named, self.is_unit) {
+            (true, false) => quote! {#ident { #fields }},
+            (false, false) => quote! {#ident ( #fields )},
+            (_, true) => quote! {#ident},
         };
-        match self.is_enum_variant {
-            true => quote! {
+        match &self.enum_variant_id {
+            Some(id) => quote! {
                 #binding => {
                     #write_to_bytes
+                    #id
                 }
             },
-            false => quote! {
+            None => quote! {
                 let #binding = self;
                 #write_to_bytes
             },
@@ -387,9 +312,6 @@ impl DataValueGroup {
 
     fn quote_from_bytes(&self) -> TokenStream2 {
         let ident = self.ident.to_token_stream();
-        if self.is_union {
-            return ident;
-        }
         let mut byte_offset = self.byte_offset;
         let values: TokenStream2 = self
             .values
@@ -399,14 +321,25 @@ impl DataValueGroup {
                 quote! {#value,}
             })
             .collect();
-        match self.is_named {
-            true => quote! {
+        match (self.is_named, self.is_unit) {
+            (true, false) => quote! {
                 #ident { #values }
             },
-            false => quote! {
+            (false, false) => quote! {
                 #ident ( #values )
             },
+            (_, true) => quote! {#ident},
         }
+    }
+
+    fn min_size(&self) -> usize {
+        // TODO!
+        0
+    }
+
+    fn max_size(&self) -> usize {
+        // TODO!
+        0
     }
 }
 
