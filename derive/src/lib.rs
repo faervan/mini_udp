@@ -58,7 +58,7 @@ struct BitReprImpl {
 }
 
 fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<BitReprImpl, TokenStream> {
-    let values = DataValueGroup::new(&data.fields, ident, None, 0);
+    let values = DataValueGroup::new(&data.fields, ident.to_token_stream(), None, 0);
     let to_bytes = values.quote_to_bytes();
     let from_bytes = values.quote_from_bytes();
 
@@ -98,27 +98,23 @@ fn impl_for_enum(data: syn::DataEnum) -> Result<BitReprImpl, TokenStream> {
         .enumerate()
         .map(|(id, variant)| {
             let id = syn::LitInt::new(&format!("{id}{data_type_str}"), Span::mixed_site());
-            DataValueGroup::new(&variant.fields, variant.ident.clone(), Some(id), 1)
+            let ident = &variant.ident;
+            let ident = quote! {Self::#ident};
+            DataValueGroup::new(&variant.fields, ident, Some(id), 1)
         })
         .collect::<Vec<_>>();
     for variant in &variants {
         min_field_len = min_field_len.min(variant.min_size());
         max_field_len = max_field_len.max(variant.max_size());
     }
-    let match_to_bytes: TokenStream2 = variants
-        .iter()
-        .map(|v| {
-            let variant = v.quote_to_bytes();
-            quote! {Self::#variant}
-        })
-        .collect();
+    let match_to_bytes: TokenStream2 = variants.iter().map(|v| v.quote_to_bytes()).collect();
     let match_from_bytes: TokenStream2 = variants
         .iter()
         .enumerate()
         .map(|(i, v)| {
             let variant = v.quote_from_bytes();
             let i = syn::LitInt::new(&format!("{i}{data_type_str}"), Span::mixed_site());
-            quote! {#i => Self::#variant,}
+            quote! {#i => #variant}
         })
         .collect();
 
@@ -232,14 +228,14 @@ struct DataValueGroup {
     is_unit: bool,
     enum_variant_id: Option<syn::LitInt>,
     byte_offset: usize,
-    ident: syn::Ident,
+    ident: TokenStream2,
     values: Vec<DataValue>,
 }
 
 impl DataValueGroup {
     fn new(
         fields: &syn::Fields,
-        ident: syn::Ident,
+        ident: TokenStream2,
         enum_variant_id: Option<syn::LitInt>,
         byte_offset: usize,
     ) -> Self {
@@ -277,9 +273,10 @@ impl DataValueGroup {
 
     fn quote_to_bytes(&self) -> TokenStream2 {
         let mut byte_offset = self.byte_offset;
-        let write_to_bytes: TokenStream2 = self
+        let write_fixed_to_bytes: TokenStream2 = self
             .values
             .iter()
+            .filter(|v| v.data_bytes().is_fixed())
             .map(|v| v.quote_to_bytes(&mut byte_offset))
             .collect();
         let fields: TokenStream2 = self
@@ -290,7 +287,7 @@ impl DataValueGroup {
                 quote! {#field_ident,}
             })
             .collect();
-        let ident = self.ident.to_token_stream();
+        let ident = &self.ident;
         let binding = match (self.is_named, self.is_unit) {
             (true, false) => quote! {#ident { #fields }},
             (false, false) => quote! {#ident ( #fields )},
@@ -299,36 +296,48 @@ impl DataValueGroup {
         match &self.enum_variant_id {
             Some(id) => quote! {
                 #binding => {
-                    #write_to_bytes
+                    #write_fixed_to_bytes
                     #id
                 }
             },
-            None => quote! {
+            None => quote! {{
                 let #binding = self;
-                #write_to_bytes
-            },
+                #write_fixed_to_bytes
+            }},
         }
     }
 
     fn quote_from_bytes(&self) -> TokenStream2 {
-        let ident = self.ident.to_token_stream();
+        let ident = &self.ident;
         let mut byte_offset = self.byte_offset;
-        let values: TokenStream2 = self
+        let read_fixed_values: TokenStream2 = self
+            .values
+            .iter()
+            .filter(|v| v.data_bytes().is_fixed())
+            .map(|v| {
+                let identifier = v.quote_identifier(false);
+                let value = v.quote_from_bytes(&mut byte_offset);
+                quote! {let #identifier = #value;}
+            })
+            .collect();
+        let fields: TokenStream2 = self
             .values
             .iter()
             .map(|v| {
-                let value = v.quote_from_bytes(&mut byte_offset);
-                quote! {#value,}
+                let field = v.quote_identifier(true);
+                quote! {#field,}
             })
             .collect();
         match (self.is_named, self.is_unit) {
-            (true, false) => quote! {
-                #ident { #values }
-            },
-            (false, false) => quote! {
-                #ident ( #values )
-            },
-            (_, true) => quote! {#ident},
+            (true, false) => quote! {{
+                #read_fixed_values
+                #ident { #fields }
+            }},
+            (false, false) => quote! {{
+                #read_fixed_values
+                #ident ( #fields )
+            }},
+            (_, true) => quote! {{#ident}},
         }
     }
 

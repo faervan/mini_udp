@@ -92,7 +92,7 @@ impl DataValue {
     }
 
     pub fn quote_from_bytes(&self, byte_offset: &mut usize) -> TokenStream2 {
-        let value = match self.kind {
+        match self.kind {
             DataValueKind::U8 => {
                 let byte = *byte_offset;
                 *byte_offset += 1;
@@ -138,12 +138,6 @@ impl DataValue {
                 }
             }
             _ => todo!(),
-        };
-        match &self.ident {
-            DataIdentifier::Named(ident) => quote! {
-                #ident: #value
-            },
-            DataIdentifier::Unnamed(_) => value,
         }
     }
 }
@@ -245,7 +239,7 @@ impl DataValueKind {
         })
     }
 
-    fn data_bytes(&self) -> FullDataBytes {
+    pub fn data_bytes(&self) -> FullDataBytes {
         match self {
             Self::Bool => FullDataBytes::None,
             Self::U8 | Self::I8 => FullDataBytes::Fixed(1),
@@ -285,9 +279,15 @@ impl DataValueKind {
     }
 }
 
-enum FullDataBytes {
+pub enum FullDataBytes {
     None,
     Fixed(usize),
     Range(Range<usize>),
     Delegated,
+}
+
+impl FullDataBytes {
+    pub fn is_fixed(&self) -> bool {
+        matches!(self, Self::Fixed(_))
+    }
 }
