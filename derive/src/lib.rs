@@ -63,10 +63,8 @@ fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<BitReprIm
     let from_bytes = values.quote_from_bytes();
 
     Ok(BitReprImpl {
-        // TODO!
-        min_len: 0,
-        // TODO!
-        max_len: 0,
+        min_len: values.min_size(),
+        max_len: values.max_size(),
         f_len: quote! {todo!()},
         f_write_to_bytes: quote! {
             #to_bytes
@@ -341,14 +339,37 @@ impl DataValueGroup {
         }
     }
 
-    fn min_size(&self) -> usize {
+    fn header_size(&self) -> usize {
         // TODO!
-        0
+        1
+    }
+
+    fn min_size(&self) -> usize {
+        // TODO! Add delegated size
+        self.values
+            .iter()
+            .map(|v| match v.data_bytes() {
+                data::FullDataBytes::None => 0,
+                data::FullDataBytes::Fixed(s) => s,
+                data::FullDataBytes::Range(r) => r.start,
+                data::FullDataBytes::Delegated => 0,
+            })
+            .sum::<usize>()
+            + self.header_size()
     }
 
     fn max_size(&self) -> usize {
-        // TODO!
-        0
+        // TODO! Add delegated size
+        self.values
+            .iter()
+            .map(|v| match v.data_bytes() {
+                data::FullDataBytes::None => 0,
+                data::FullDataBytes::Fixed(s) => s,
+                data::FullDataBytes::Range(r) => r.end,
+                data::FullDataBytes::Delegated => 0,
+            })
+            .sum::<usize>()
+            + self.header_size()
     }
 }
 

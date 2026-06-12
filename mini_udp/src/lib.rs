@@ -139,7 +139,7 @@ mod test {
     #[macro_export]
     macro_rules! test_bitrepr_roundtrip {
         ($binding:ident, $ty:ident, $init:expr) => {
-            let mut buf = [0; 30];
+            let mut buf = [0; $ty::MAX_BIT_LEN];
             let $binding = $init;
             assert!($binding.write_to_bytes(&mut buf).is_ok());
             assert_eq!($ty::from_bytes(&buf).unwrap(), $binding);

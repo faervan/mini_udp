@@ -291,3 +291,9 @@ impl FullDataBytes {
         matches!(self, Self::Fixed(_))
     }
 }
+
+pub struct Header {
+    bit_len: usize,
+    set_ptr: usize,
+    get_ptr: usize,
+}
