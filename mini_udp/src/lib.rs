@@ -1,10 +1,17 @@
 #[cfg(test)]
 extern crate self as mini_udp;
 
-mod bit_repr;
-pub use bit_repr::{BitRepr, BitReprError};
-
 pub use mini_udp_derive::BitRepr;
+
+mod bit_repr;
+pub use bit_repr::{BitRepr, BitReprError, BitReprExt, StaticBitRepr};
+
+mod packet;
+mod packet_ack;
+mod ring_buffer;
+
+mod sender;
+pub use sender::{MultiUdpCommunicator, UdpCommunicator};
 
 #[cfg(test)]
 mod test {
@@ -66,6 +73,44 @@ mod test {
             C,
         }
         #[derive(BitRepr, PartialEq, Debug)]
+        enum C {
+            B(u8),
+            C { byte0: u8, byte1: u8, float: f32 },
+            D,
+            E(f64, u8, f32, f64),
+        }
+
+        crate::test_bitrepr_roundtrip!(a, A, A::B);
+        crate::test_bitrepr_roundtrip!(b, B, B::B);
+        crate::test_bitrepr_roundtrip!(c, C, C::B(129));
+        crate::test_bitrepr_roundtrip!(c, C, C::D);
+        crate::test_bitrepr_roundtrip!(
+            c,
+            C,
+            C::C {
+                byte0: 0,
+                byte1: 255,
+                float: 1031.420123
+            }
+        );
+        crate::test_bitrepr_roundtrip!(c, C, C::E(f64::MAX, 4, -193042.04, f64::MIN));
+    }
+
+    #[cfg(feature = "byteable")]
+    #[test]
+    fn byteable_enum_roundtrip() {
+        use byteable::Byteable;
+        #[derive(Byteable, PartialEq, Debug, Clone, Copy)]
+        enum A {
+            B,
+        }
+        #[derive(Byteable, PartialEq, Debug, Clone, Copy)]
+        enum B {
+            A,
+            B,
+            C,
+        }
+        #[derive(Byteable, PartialEq, Debug)]
         enum C {
             B(u8),
             C { byte0: u8, byte1: u8, float: f32 },

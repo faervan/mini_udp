@@ -4,9 +4,15 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[features]
+default = ["byteable"]
+byteable = ["dep:byteable"]
+
 [dependencies]
 mini_udp_derive.workspace = true
 
 crc.workspace = true
 thiserror.workspace = true
 rand.workspace = true
+ringbuffer.workspace = true
+byteable = { workspace = true, optional = true }
