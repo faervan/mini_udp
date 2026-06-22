@@ -11,10 +11,12 @@ authors = ["faervan <faervan@proton.me>"]
 mini_udp_derive.path = "derive"
 
 crc = "3.4"
-thiserror = "2"
 rand = "0.10"
 ringbuffer = { version = "0.16", default-features = false }
 byteable = "0.32"
+
+thiserror = "2"
+enum-assoc = "1.3"
 
 # Proc macro libs
 proc-macro2 = "1.0"

@@ -1,11 +1,13 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{ToTokens as _, quote};
+use quote::quote;
 use syn::{DeriveInput, parse_macro_input};
 
-use crate::data::DataValue;
+use crate::{data::DataValue, data_group::Fields, data2::Context};
 
 mod data;
+mod data2;
+mod data_group;
 
 #[proc_macro_derive(BitRepr)]
 pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
@@ -21,7 +23,7 @@ pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
             Ok(v) => v,
             Err(e) => return e,
         },
-        syn::Data::Enum(data) => match impl_for_enum(data) {
+        syn::Data::Enum(data) => match impl_for_enum(input.ident.clone(), data) {
             Ok(v) => v,
             Err(e) => return e,
         },
@@ -50,33 +52,56 @@ pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
 }
 
 struct BitReprImpl {
-    min_len: usize,
-    max_len: usize,
+    min_len: TokenStream2,
+    max_len: TokenStream2,
     f_len: TokenStream2,
     f_write_to_bytes: TokenStream2,
     f_from_bytes: TokenStream2,
 }
 
 fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<BitReprImpl, TokenStream> {
-    let values = DataValueGroup::new(&data.fields, ident.to_token_stream(), None, 0);
-    let to_bytes = values.quote_to_bytes();
-    let from_bytes = values.quote_from_bytes();
+    let mut context = Context::default();
+    let values = Fields::new(ident, &data.fields, None, &mut context);
+    let read = values.read();
+    let write = values.write();
+
+    let fixed_len = context.byte_offset;
+
+    let variable_min_len = values.min_variable_byte_len();
+    let min_len = quote! {#fixed_len #variable_min_len};
+
+    let variable_max_len = values.max_variable_byte_len();
+    let max_len = quote! {#fixed_len #variable_max_len};
+
+    let variable_len = values.variable_byte_len();
 
     Ok(BitReprImpl {
-        min_len: values.min_size(),
-        max_len: values.max_size(),
-        f_len: quote! {todo!()},
+        f_len: quote! {#min_len #variable_len},
+        min_len,
+        max_len,
         f_write_to_bytes: quote! {
-            #to_bytes
+            #write
             Ok(())
         },
-        f_from_bytes: quote! {Ok(#from_bytes)},
+        f_from_bytes: quote! {Ok({#read})},
     })
 }
 
-fn impl_for_enum(data: syn::DataEnum) -> Result<BitReprImpl, TokenStream> {
-    let mut min_field_len = usize::MAX;
-    let mut max_field_len = 0;
+fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<BitReprImpl, TokenStream> {
+    // Get the amount of bits needed to represent all variants
+    let variant_bit_len = match data.variants.len() {
+        0 | 1 => 0,
+        len => (len - 1).ilog2() + 1,
+    };
+    let variant_bit_len: usize = variant_bit_len.try_into().unwrap();
+    let variant_len = (variant_bit_len as f32 / 8.).ceil() as usize;
+    let mut min_len = usize::MAX;
+    let mut unknown_min_len = vec![];
+    let mut max_len = 0;
+    // Whether the variant referred to in `max_len` has an unknown part.
+    let mut max_is_unknown = false;
+    let mut unknown_max_len = vec![];
+
     let data_access_type = match data.variants.len() {
         0 => {
             return Err(compile_error(
@@ -90,31 +115,48 @@ fn impl_for_enum(data: syn::DataEnum) -> Result<BitReprImpl, TokenStream> {
         _ => return Err(compile_error(data.enum_token.span, "What are you doing?")),
     };
     let data_type_str = data_access_type.as_str();
+    // Stores the fields and their fixed size for each variant
     let variants = data
         .variants
         .iter()
         .enumerate()
         .map(|(id, variant)| {
+            let mut context = Context {
+                byte_offset: variant_len,
+            };
             let id = syn::LitInt::new(&format!("{id}{data_type_str}"), Span::mixed_site());
-            let ident = &variant.ident;
-            let ident = quote! {Self::#ident};
-            DataValueGroup::new(&variant.fields, ident, Some(id), 1)
+            let fields = Fields::new(
+                ident.clone(),
+                &variant.fields,
+                Some((variant.ident.clone(), id)),
+                &mut context,
+            );
+            (fields, context.byte_offset)
         })
         .collect::<Vec<_>>();
-    for variant in &variants {
-        min_field_len = min_field_len.min(variant.min_size());
-        max_field_len = max_field_len.max(variant.max_size());
+    for (fields, fixed_size) in &variants {
+        min_len = min_len.min(*fixed_size);
+        let max_variable = fields.max_variable_byte_len();
+        if !max_variable.is_empty() {
+            unknown_max_len.push(quote! {#fixed_size #max_variable});
+            if *fixed_size > max_len {
+                max_is_unknown = true;
+            }
+        } else if *fixed_size > max_len {
+            max_is_unknown = false;
+        }
+        max_len = max_len.max(*fixed_size);
     }
-    let match_to_bytes: TokenStream2 = variants.iter().map(|v| v.quote_to_bytes()).collect();
-    let match_from_bytes: TokenStream2 = variants
+    let read: TokenStream2 = variants
         .iter()
         .enumerate()
-        .map(|(i, v)| {
-            let variant = v.quote_from_bytes();
+        .map(|(i, (fields, _))| {
+            let read = fields.read();
             let i = syn::LitInt::new(&format!("{i}{data_type_str}"), Span::mixed_site());
-            quote! {#i => #variant}
+            quote! {#i => {#read}}
         })
         .collect();
+    let write: TokenStream2 = variants.iter().map(|(fields, _)| fields.write()).collect();
 
     let bytes_ident = quote! {bytes};
     let data_access_mut = DataAccess {
@@ -126,13 +168,21 @@ fn impl_for_enum(data: syn::DataEnum) -> Result<BitReprImpl, TokenStream> {
     let to_bytes = data_access_mut.ty.as_u8();
     let assign = data_access_mut
         .ty
-        .assign_value(access, quote! {value #to_bytes});
-    let f_write_to_bytes = quote! {
-        let value = match self {
-            #match_to_bytes
-        };
-        #assign;
-        Ok(())
+        .assign_value(access, quote! {variant_id #to_bytes});
+    let f_write_to_bytes = match variants.len() <= 1 {
+        true => quote! {
+            let _ = match self {
+                #write
+            };
+            Ok(())
+        },
+        false => quote! {
+            let variant_id = match self {
+                #write
+            };
+            #assign;
+            Ok(())
+        },
     };
 
     let data_access = DataAccess {
@@ -141,22 +191,42 @@ fn impl_for_enum(data: syn::DataEnum) -> Result<BitReprImpl, TokenStream> {
         byte_offset: 0,
     };
     let access = data_access.slice_access(bytes_ident);
-    let f_from_bytes = quote! {
-        Ok(match #access {
-            #match_from_bytes
-            _ => return Err(::mini_udp::BitReprError::InvalidValue),
+    let f_from_bytes = match variants.len() == 1 {
+        true => {
+            let read = variants.first().unwrap().0.read();
+            quote! {
+                Ok(#read)
+            }
+        }
+        false => quote! {
+            Ok(match #access {
+                #read
+                _ => return Err(::mini_udp::BitReprError::InvalidValue),
+            })
+        },
+    };
+
+    let match_len: TokenStream2 = variants
+        .iter()
+        .map(|(fields, fixed_size)| {
+            let binding = fields.binding();
+            let variable_size = fields.variable_byte_len();
+            quote! {
+                #binding => {
+                    #fixed_size #variable_size
+                }
+            }
         })
+        .collect();
+    let f_len = quote! {
+        match self {
+            #match_len
+        }
     };
-    // Get the amount of bits needed to represent all variants
-    let len = match data.variants.len() {
-        0 | 1 => 0,
-        len => (len - 1).ilog2() + 1,
-    };
-    let len: usize = len.try_into().unwrap();
     Ok(BitReprImpl {
-        min_len: len + min_field_len,
-        max_len: len + max_field_len,
-        f_len: quote! {#len},
+        min_len,
+        max_len,
+        f_len,
         f_write_to_bytes,
         f_from_bytes,
     })
@@ -212,7 +282,7 @@ impl DataAccessType {
     }
     fn assign_value(&self, access: TokenStream2, value: TokenStream2) -> TokenStream2 {
         match self {
-            Self::U8 => quote! {*#access = value},
+            Self::U8 => quote! {*#access = variant_id},
             Self::U16 | Self::U32 => quote! {#access.copy_from_slice(#value)},
         }
     }

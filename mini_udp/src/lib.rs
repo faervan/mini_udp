@@ -33,12 +33,12 @@ mod test {
         struct E(u8);
         #[derive(BitRepr, PartialEq, Debug)]
         struct F {
-            first: u8,
-            second: u8,
+            first: u16,
+            second: isize,
             third: u8,
         }
         #[derive(BitRepr, PartialEq, Debug)]
-        struct G(u8, u8);
+        struct G(u8, i128);
 
         crate::test_bitrepr_roundtrip!(a, A, A {});
         crate::test_bitrepr_roundtrip!(b, B, B);
@@ -52,8 +52,8 @@ mod test {
             f,
             F,
             F {
-                first: 255,
-                second: 0,
+                first: 61008,
+                second: -90_502,
                 third: 119
             }
         );
@@ -75,7 +75,7 @@ mod test {
         #[derive(BitRepr, PartialEq, Debug)]
         enum C {
             B(u8),
-            C { byte0: u8, byte1: u8, float: f32 },
+            C { byte0: u8, byte1: u64, float: f32 },
             D,
             E(f64, u8, f32, f64),
         }
@@ -94,6 +94,17 @@ mod test {
             }
         );
         crate::test_bitrepr_roundtrip!(c, C, C::E(f64::MAX, 4, -193042.04, f64::MIN));
+    }
+
+    #[test]
+    fn delegated() {
+        #[derive(BitRepr, PartialEq, Debug)]
+        struct A {
+            x: f32,
+            y: B,
+        }
+        #[derive(BitRepr, PartialEq, Debug)]
+        struct B(u128);
     }
 
     #[cfg(feature = "byteable")]
