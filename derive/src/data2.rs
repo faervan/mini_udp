@@ -1,3 +1,6 @@
+use std::iter::Sum;
+use std::ops::Add;
+
 use enum_assoc::Assoc;
 use proc_macro2::Span;
 use proc_macro2::TokenStream as TokenStream2;
@@ -12,15 +15,22 @@ pub struct Field {
     byte_offset: usize,
     pub ident: FieldIdentifier,
     pub value: Value,
+    is_part_of_enum: bool,
 }
 
 impl Field {
-    pub fn new(context: &mut Context, ident: FieldIdentifier, value: Value) -> Self {
+    pub fn new(
+        context: &mut Context,
+        ident: FieldIdentifier,
+        value: Value,
+        is_part_of_enum: bool,
+    ) -> Self {
         let fixed_len = value.fixed_byte_len();
         let this = Self {
             byte_offset: context.byte_offset,
             ident,
             value,
+            is_part_of_enum,
         };
         context.byte_offset += fixed_len;
         this
@@ -31,7 +41,7 @@ impl Field {
             let byte = self.byte_offset;
             let access = quote! {*bytes.get(#byte).ok_or(::mini_udp::BitReprError::SliceTooShort)?};
             let value = match &self.value {
-                Value::Bool => quote! {#access & 1 << 7},
+                Value::Bool => quote! {#access & 1 << 7 == 1},
                 Value::U8 => access,
                 Value::I8 => quote! {#access as i8},
                 Value::Delegated { .. } => quote! {#access as usize},
@@ -66,7 +76,7 @@ impl Field {
         let ident = syn::Ident::from(&self.ident);
         let fixed_ident = self.fixed_ident();
         quote! {
-            let #ident = #ty::from_bytes(bytes[byte_ptr..])?;
+            let #ident = #ty::from_bytes(&bytes[byte_ptr..])?;
             byte_ptr += #fixed_ident;
         }
     }
@@ -78,13 +88,13 @@ impl Field {
             let access =
                 quote! {*bytes.get_mut(#byte).ok_or(::mini_udp::BitReprError::SliceTooShort)?};
             let byte_value = match &self.value {
-                Value::Bool => quote! {if #ident {0_u8 & 1 << 7} else {0}},
-                Value::U8 => ident.into_token_stream(),
-                Value::I8 => quote! {#ident as u8},
-                Value::Delegated { .. } => quote! {#ident.bit_len()},
+                Value::Bool => quote! {if *#ident {0_u8 & 1 << 7} else {0}},
+                Value::U8 => quote! {*#ident},
+                Value::I8 => quote! {*#ident as u8},
+                Value::Delegated { .. } => quote! {#ident.bit_len() as u8},
                 _ => unreachable!(),
             };
-            return quote! {#access = *#byte_value;};
+            return quote! {#access = #byte_value;};
         }
         assert!(self.value.static_len());
         let byte_start = self.byte_offset;
@@ -105,7 +115,7 @@ impl Field {
         }
         let ident = syn::Ident::from(&self.ident);
         quote! {
-            #ident.write_to_bytes(&mut bytes[byte_ptr..]);
+            #ident.write_to_bytes(&mut bytes[byte_ptr..])?;
             byte_ptr += #ident.bit_len();
         }
     }
@@ -123,6 +133,20 @@ impl Field {
         }
     }
 
+    pub fn length(&self) -> ByteLen {
+        let field = match self.is_part_of_enum {
+            true => syn::Ident::from(&self.ident).into_token_stream(),
+            false => {
+                let field = match &self.ident {
+                    FieldIdentifier::Named(ident) => ident.to_token_stream(),
+                    FieldIdentifier::Unnamed(index) => syn::Index::from(*index).into_token_stream(),
+                };
+                quote! {self.#field}
+            }
+        };
+        self.value.length(field)
+    }
+
     fn fixed_ident(&self) -> syn::Ident {
         syn::Ident::new(
             &format!("{}_fixed", syn::Ident::from(&self.ident)),
@@ -137,7 +161,7 @@ impl Field {
 #[func(fn fixed_byte_len(&self) -> usize {1})]
 #[func(pub fn min_variable_byte_len(&self) -> TokenStream2 {quote! {}})]
 #[func(pub fn max_variable_byte_len(&self) -> TokenStream2 {quote! {}})]
-#[func(pub fn length(&self) -> ByteLen)]
+#[func(fn length(&self, field: TokenStream2) -> ByteLen)]
 pub enum Value {
     #[assoc(name = quote! {bool}, length = ByteLen::fully_static(1))]
     Bool,
@@ -178,7 +202,11 @@ pub enum Value {
         static_len = false,
         min_variable_byte_len = quote! {+ #_ty::MIN_BIT_LEN},
         max_variable_byte_len = quote! {+ #_ty::MAX_BIT_LEN},
-        length = ByteLen::fully_unknown(quote! {#_ty::MIN_BIT_LEN}, quote! {#_ty::MAX_BIT_LEN})
+        length = ByteLen::fully_unknown(
+            quote! {#_ty::MIN_BIT_LEN},
+            quote! {#_ty::MAX_BIT_LEN},
+            quote! {#field.bit_len()}
+        )
     )]
     Delegated { ty: Box<syn::Type> },
 }
@@ -237,61 +265,122 @@ impl From<&FieldIdentifier> for syn::Ident {
     }
 }
 
-pub enum ByteLen {
-    FullyStatic {
-        length: usize,
-    },
-    FullyKnownVariableLength {
-        min: usize,
-        max: usize,
-    },
-    FullyUnknown {
-        known_min: usize,
-        known_max: usize,
-        unknown_min: TokenStream2,
-        unknown_max: TokenStream2,
-    },
+pub struct ByteLen {
+    pub min_length: usize,
+    pub max_length: usize,
+    pub unknown_min: TokenStream2,
+    pub unknown_max: TokenStream2,
+    unknown_length: TokenStream2,
 }
 
 impl ByteLen {
     fn fully_static(length: usize) -> Self {
-        Self::FullyStatic { length }
-    }
-
-    fn known_variable(min: usize, max: usize) -> Self {
-        Self::FullyKnownVariableLength { min, max }
-    }
-
-    fn fully_unknown(unknown_min: TokenStream2, unknown_max: TokenStream2) -> Self {
-        Self::FullyUnknown {
-            known_min: 0,
-            known_max: 0,
-            unknown_min,
-            unknown_max,
+        Self {
+            min_length: length,
+            max_length: length,
+            unknown_min: quote! {},
+            unknown_max: quote! {},
+            unknown_length: quote! {},
         }
     }
 
-    fn add(&self, other: &Self) -> Self {
-        match (self, other) {
-            (ByteLen::FullyStatic { length }, ByteLen::FullyStatic { length: length2 }) => {
-                ByteLen::FullyStatic {
-                    length: length + length2,
-                }
-            }
-            (
-                ByteLen::FullyStatic { length },
-                ByteLen::FullyUnknown {
-                    known_min,
-                    known_max,
-                    unknown_min,
-                    unknown_max,
-                },
-            ) => ByteLen::FullyUnknown {
-                known_min: *known_min + length,
-                known_max: *known_max + length,
-                unknown_min,
-                unknown_max,
-            },
+    fn known_variable(min: usize, max: usize) -> Self {
+        Self {
+            min_length: min,
+            max_length: max,
+            unknown_min: quote! {},
+            unknown_max: quote! {},
+            unknown_length: quote! {},
+        }
+    }
+
+    fn fully_unknown(
+        unknown_min: TokenStream2,
+        unknown_max: TokenStream2,
+        unknown_length: TokenStream2,
+    ) -> Self {
+        Self {
+            min_length: 0,
+            max_length: 0,
+            unknown_min,
+            unknown_max,
+            unknown_length,
+        }
+    }
+
+    pub fn as_const_min_length(&self) -> TokenStream2 {
+        let min = self.min_length;
+        if self.unknown_min.is_empty() {
+            min.to_token_stream()
+        } else {
+            let unknown = &self.unknown_min;
+            quote! {#min + #unknown}
+        }
+    }
+
+    pub fn as_const_max_length(&self) -> TokenStream2 {
+        let max = self.max_length;
+        if self.unknown_max.is_empty() {
+            max.to_token_stream()
+        } else {
+            let unknown = &self.unknown_max;
+            quote! {#max + #unknown}
+        }
+    }
+
+    pub fn as_length(&self) -> TokenStream2 {
+        if !self.unknown_length.is_empty() {
+            return self.unknown_length.clone();
+        }
+        assert_eq!(self.min_length, self.max_length);
+        let mut len = self.min_length.to_token_stream();
+        if !self.unknown_min.is_empty() {
+            len.extend([quote! {+ }, self.unknown_min.clone()]);
+        }
+        if !self.unknown_max.is_empty() {
+            len.extend([quote! {+ }, self.unknown_max.clone()]);
+        }
+        len
+    }
+}
+
+impl Sum for ByteLen {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(ByteLen::fully_static(0), |acc, next| acc + next)
+    }
+}
+
+impl Add<Self> for ByteLen {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        let min_a = self.unknown_min;
+        let min_b = rhs.unknown_min;
+        let max_a = self.unknown_max;
+        let max_b = rhs.unknown_max;
+        let len_a = self.unknown_length;
+        let len_b = rhs.unknown_length;
+
+        let unknown_min = if !min_a.is_empty() && !min_b.is_empty() {
+            quote! {#min_a + #min_b}
+        } else {
+            quote! {#min_a #min_b}
+        };
+        let unknown_max = if !max_a.is_empty() && !max_b.is_empty() {
+            quote! {#max_a + #max_b}
+        } else {
+            quote! {#max_a #max_b}
+        };
+        let unknown_length = if !len_a.is_empty() && !len_b.is_empty() {
+            quote! {#len_a + #len_b}
+        } else {
+            quote! {#len_a #len_b}
+        };
+        Self {
+            min_length: self.min_length + rhs.min_length,
+            max_length: self.max_length + rhs.max_length,
+            unknown_min,
+            unknown_max,
+            unknown_length,
         }
     }
 }

@@ -18,6 +18,123 @@ mod test {
     use super::*;
 
     #[test]
+    fn min_max_length_derive() {
+        #[derive(BitRepr)]
+        struct AA {}
+        assert_eq!(AA::MIN_BIT_LEN, 0);
+        assert_eq!(AA::MAX_BIT_LEN, 0);
+
+        #[derive(BitRepr)]
+        struct AB();
+        assert_eq!(AB::MIN_BIT_LEN, 0);
+        assert_eq!(AB::MAX_BIT_LEN, 0);
+
+        #[derive(BitRepr)]
+        struct AC;
+        assert_eq!(AC::MIN_BIT_LEN, 0);
+        assert_eq!(AC::MAX_BIT_LEN, 0);
+
+        #[derive(BitRepr)]
+        enum AD {
+            A,
+        }
+        assert_eq!(AD::MIN_BIT_LEN, 0);
+        assert_eq!(AD::MAX_BIT_LEN, 0);
+
+        #[derive(BitRepr)]
+        struct BA {
+            n: u8,
+        }
+        assert_eq!(BA::MIN_BIT_LEN, 1);
+        assert_eq!(BA::MAX_BIT_LEN, 1);
+
+        #[derive(BitRepr)]
+        struct BB(u8);
+        assert_eq!(BB::MIN_BIT_LEN, 1);
+        assert_eq!(BB::MAX_BIT_LEN, 1);
+
+        #[derive(BitRepr)]
+        enum BC {
+            A(u8),
+        }
+        assert_eq!(BC::MIN_BIT_LEN, 1);
+        assert_eq!(BC::MAX_BIT_LEN, 1);
+
+        #[derive(BitRepr)]
+        struct CA {
+            named: f32,
+            unnamed: bool,
+            b: u128,
+        }
+        assert_eq!(CA::MIN_BIT_LEN, 21);
+        assert_eq!(CA::MAX_BIT_LEN, 21);
+
+        #[derive(BitRepr)]
+        struct CB(i64, i8);
+        assert_eq!(CB::MIN_BIT_LEN, 9);
+        assert_eq!(CB::MAX_BIT_LEN, 9);
+
+        #[derive(BitRepr)]
+        enum CC {
+            A { x: u32 },
+            B(bool, u16),
+            C(i128),
+        }
+        assert_eq!(CC::MIN_BIT_LEN, 4);
+        assert_eq!(CC::MAX_BIT_LEN, 17);
+
+        #[derive(BitRepr)]
+        struct DA(CC);
+        assert_eq!(DA::MIN_BIT_LEN, 4);
+        assert_eq!(DA::MAX_BIT_LEN, 17);
+
+        #[derive(BitRepr)]
+        struct DB {
+            a: bool,
+            b: i32,
+            c: DA,
+        }
+        assert_eq!(DB::MIN_BIT_LEN, 9);
+        assert_eq!(DB::MAX_BIT_LEN, 22);
+
+        #[derive(BitRepr)]
+        enum DC {
+            A,
+            B(u16),
+            C { nested: CB },
+        }
+        assert_eq!(DC::MIN_BIT_LEN, 1);
+        assert_eq!(DC::MAX_BIT_LEN, 10);
+
+        #[derive(BitRepr)]
+        enum DD {
+            B(u64, bool, u8),
+            C { nested: CB },
+            BC(BC, i8),
+        }
+        assert_eq!(DD::MIN_BIT_LEN, 3);
+        assert_eq!(DD::MAX_BIT_LEN, 11);
+
+        #[derive(BitRepr)]
+        enum DE {
+            X(bool, BA, u16),
+            Y { fixed: DB, x: u8 },
+            Z(bool, i8),
+        }
+        assert_eq!(DE::MIN_BIT_LEN, 3);
+        assert_eq!(DE::MAX_BIT_LEN, 24);
+
+        #[derive(BitRepr)]
+        enum DF {
+            X(bool, BA, u16),
+            Y { fixed: DB, x: u8 },
+            Z(CA, i16, BA),
+        }
+        assert_eq!(DF::MIN_BIT_LEN, 5);
+        assert_eq!(DF::MAX_BIT_LEN, 25);
+    }
+
+    #[test]
     fn struct_roundtrip() {
         #[derive(BitRepr, PartialEq, Debug)]
         struct A {}

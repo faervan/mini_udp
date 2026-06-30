@@ -1,9 +1,13 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{DeriveInput, parse_macro_input};
 
-use crate::{data::DataValue, data_group::Fields, data2::Context};
+use crate::{
+    data::DataValue,
+    data_group::Fields,
+    data2::{Context, Field},
+};
 
 mod data;
 mod data2;
@@ -64,21 +68,12 @@ fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<BitReprIm
     let values = Fields::new(ident, &data.fields, None, &mut context);
     let read = values.read();
     let write = values.write();
-
-    let fixed_len = context.byte_offset;
-
-    let variable_min_len = values.min_variable_byte_len();
-    let min_len = quote! {#fixed_len #variable_min_len};
-
-    let variable_max_len = values.max_variable_byte_len();
-    let max_len = quote! {#fixed_len #variable_max_len};
-
-    let variable_len = values.variable_byte_len();
+    let length = values.length();
 
     Ok(BitReprImpl {
-        f_len: quote! {#min_len #variable_len},
-        min_len,
-        max_len,
+        f_len: length.as_length(),
+        min_len: length.as_const_min_length(),
+        max_len: length.as_const_max_length(),
         f_write_to_bytes: quote! {
             #write
             Ok(())
@@ -95,12 +90,6 @@ fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<BitReprImpl, 
     };
     let variant_bit_len: usize = variant_bit_len.try_into().unwrap();
     let variant_len = (variant_bit_len as f32 / 8.).ceil() as usize;
-    let mut min_len = usize::MAX;
-    let mut unknown_min_len = vec![];
-    let mut max_len = 0;
-    // Whether the variant referred to in `max_len` has an unknown part.
-    let mut max_is_unknown = false;
-    let mut unknown_max_len = vec![];
 
     let data_access_type = match data.variants.len() {
         0 => {
@@ -125,38 +114,24 @@ fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<BitReprImpl, 
                 byte_offset: variant_len,
             };
             let id = syn::LitInt::new(&format!("{id}{data_type_str}"), Span::mixed_site());
-            let fields = Fields::new(
+            Fields::new(
                 ident.clone(),
                 &variant.fields,
                 Some((variant.ident.clone(), id)),
                 &mut context,
-            );
-            (fields, context.byte_offset)
+            )
         })
         .collect::<Vec<_>>();
-    for (fields, fixed_size) in &variants {
-        min_len = min_len.min(*fixed_size);
-        let max_variable = fields.max_variable_byte_len();
-        if !max_variable.is_empty() {
-            unknown_max_len.push(quote! {#fixed_size #max_variable});
-            if *fixed_size > max_len {
-                max_is_unknown = true;
-            }
-        } else if *fixed_size > max_len {
-            max_is_unknown = false;
-        }
-        max_len = max_len.max(*fixed_size);
-    }
     let read: TokenStream2 = variants
         .iter()
         .enumerate()
-        .map(|(i, (fields, _))| {
+        .map(|(i, fields)| {
             let read = fields.read();
             let i = syn::LitInt::new(&format!("{i}{data_type_str}"), Span::mixed_site());
             quote! {#i => {#read}}
         })
         .collect();
-    let write: TokenStream2 = variants.iter().map(|(fields, _)| fields.write()).collect();
+    let write: TokenStream2 = variants.iter().map(Fields::write).collect();
 
     let bytes_ident = quote! {bytes};
     let data_access_mut = DataAccess {
@@ -193,9 +168,9 @@ fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<BitReprImpl, 
     let access = data_access.slice_access(bytes_ident);
     let f_from_bytes = match variants.len() == 1 {
         true => {
-            let read = variants.first().unwrap().0.read();
+            let read = variants.first().unwrap().read();
             quote! {
-                Ok(#read)
+                Ok({#read})
             }
         }
         false => quote! {
@@ -208,12 +183,12 @@ fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<BitReprImpl, 
 
     let match_len: TokenStream2 = variants
         .iter()
-        .map(|(fields, fixed_size)| {
+        .map(|fields| {
             let binding = fields.binding();
-            let variable_size = fields.variable_byte_len();
+            let length = fields.length().as_length();
             quote! {
                 #binding => {
-                    #fixed_size #variable_size
+                    #length
                 }
             }
         })
@@ -224,12 +199,86 @@ fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<BitReprImpl, 
         }
     };
     Ok(BitReprImpl {
-        min_len,
-        max_len,
+        min_len: lowest_min_len(&variants, variant_len),
+        max_len: lowest_max_len(&variants, variant_len),
         f_len,
         f_write_to_bytes,
         f_from_bytes,
     })
+}
+
+fn lowest_min_len(variants: &[Fields], variant_len: usize) -> TokenStream2 {
+    let known_min = variants
+        .iter()
+        .map(|f| f.length())
+        .filter(|f| f.unknown_min.is_empty())
+        .map(|f| f.min_length)
+        .min()
+        .unwrap_or(usize::MAX);
+    if variants.iter().all(|f| f.length().unknown_min.is_empty()) {
+        (known_min + variant_len).to_token_stream()
+    } else {
+        let mut options = vec![known_min.into_token_stream()];
+        for length in variants.iter().map(Fields::length) {
+            if length.unknown_min.is_empty() {
+                continue;
+            }
+            options.push(length.as_const_min_length());
+        }
+        let min_variant = const_min_max_list(&options, quote! {<=});
+        quote! {#min_variant + #variant_len}
+    }
+}
+
+fn lowest_max_len(variants: &[Fields], variant_len: usize) -> TokenStream2 {
+    let known_max = variants
+        .iter()
+        .map(|f| f.length())
+        .filter(|f| f.unknown_max.is_empty())
+        .map(|f| f.max_length)
+        .max()
+        .unwrap_or_default();
+    if variants.iter().all(|f| f.length().unknown_max.is_empty()) {
+        (known_max + variant_len).to_token_stream()
+    } else {
+        let mut options = vec![known_max.to_token_stream()];
+        for length in variants.iter().map(Fields::length) {
+            if length.unknown_max.is_empty() {
+                continue;
+            }
+            options.push(length.as_const_max_length());
+        }
+        let max_variant = const_min_max_list(&options, quote! {>=});
+        quote! {#max_variant + #variant_len}
+    }
+}
+
+fn const_min_max_list(options: &[TokenStream2], operator: TokenStream2) -> TokenStream2 {
+    assert!(!options.is_empty());
+    let first = options[0].clone();
+    if options.len() == 1 {
+        return first;
+    }
+    let checks = options
+        .iter()
+        .skip(1)
+        .enumerate()
+        .map(|(i, len)| {
+            if i + 2 < options.len() {
+                quote! {#first #operator #len && }
+            } else {
+                quote! {#first #operator #len}
+            }
+        })
+        .collect::<TokenStream2>();
+    let nest = const_min_max_list(&options[1..], operator);
+    quote! {
+        if #checks {
+            #first
+        } else {
+            #nest
+        }
+    }
 }
 
 struct DataAccess {

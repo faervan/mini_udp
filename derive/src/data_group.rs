@@ -9,6 +9,7 @@ pub struct Fields {
     kind: FieldKind,
     /// Stores variant name and variant id (numeric)
     enum_variant: Option<(syn::Ident, syn::LitInt)>,
+    fixed_bytes: usize,
 }
 
 enum FieldKind {
@@ -40,6 +41,7 @@ impl Fields {
                         .clone()
                         .map_or_else(|| FieldIdentifier::Unnamed(index), FieldIdentifier::Named),
                     Value::from_type(&field.ty),
+                    enum_variant.is_some(),
                 )
             })
             .collect();
@@ -54,6 +56,7 @@ impl Fields {
             fields,
             kind,
             enum_variant,
+            fixed_bytes: context.byte_offset,
         }
     }
 
@@ -63,15 +66,18 @@ impl Fields {
             self.fields.iter().map(Field::read_variable_part).collect();
         let fields = self.bind_fields();
         let ident = &self.ident;
+        let byte_ptr = self.fixed_bytes;
         match self.kind {
             FieldKind::Unit => ident.into_token_stream(),
             FieldKind::Named => quote! {
                 #read_fixed
+                let mut byte_ptr = #byte_ptr;
                 #read_variable
                 #ident { #fields }
             },
             FieldKind::Unnamed => quote! {
                 #read_fixed
+                let mut byte_ptr = #byte_ptr;
                 #read_variable
                 #ident ( #fields )
             },
@@ -83,10 +89,12 @@ impl Fields {
         let write_variable: TokenStream2 =
             self.fields.iter().map(Field::write_variable_part).collect();
         let binding = self.binding();
+        let byte_ptr = self.fixed_bytes;
         match &self.enum_variant {
             Some((_, id)) => quote! {
                 #binding => {
                     #write_fixed
+                    let mut byte_ptr = #byte_ptr;
                     #write_variable
                     #id
                 }
@@ -94,13 +102,14 @@ impl Fields {
             None => quote! {{
                 let #binding = self;
                 #write_fixed
+                let mut byte_ptr = #byte_ptr;
                 #write_variable
             }},
         }
     }
 
     pub fn length(&self) -> ByteLen {
-        todo!()
+        self.fields.iter().map(Field::length).sum()
     }
 
     pub fn min_variable_byte_len(&self) -> TokenStream2 {
