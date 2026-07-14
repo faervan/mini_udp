@@ -83,6 +83,7 @@ mod test {
         );
         assert_eq!(crate::PacketAck::MIN_BYTE_LEN, 8);
         assert_eq!(Packet::<InnerUdpMessage>::MIN_BYTE_LEN, 14);
+        assert_eq!(Packet::<InnerUdpMessage>::MAX_BYTE_LEN, 3014);
         let mut buf = [0; Packet::<InnerUdpMessage>::MAX_BYTE_LEN];
         assert!(packet.write_to_bytes(&mut buf).is_ok());
         assert_eq!(

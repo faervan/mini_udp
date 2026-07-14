@@ -55,8 +55,10 @@ impl Field {
         let len = length.fixed_bytes;
         let byte_end = byte_start + len;
         let bytes = quote! {
-            TryInto::<[u8; #len]>::try_into(&bytes[#byte_start..#byte_end])
-                .map_err(|_| ::mini_udp::ByteReprError::SliceTooShort)?
+            TryInto::<[u8; #len]>::try_into(
+                bytes.get(#byte_start..#byte_end).ok_or(::mini_udp::ByteReprError::SliceTooShort)?
+            )
+            .map_err(|_| ::mini_udp::ByteReprError::SliceTooShort)?
         };
         if length.is_static() {
             let ident = syn::Ident::from(&self.ident);
@@ -120,13 +122,13 @@ impl Field {
         };
         let byte_end = byte_start + len;
         let access = quote! {
-            bytes[#byte_start..#byte_end]
+            bytes.get_mut(#byte_start..#byte_end).ok_or(::mini_udp::ByteReprError::SliceTooShort)?
         };
         let thing = match length.is_static() {
             true => ident.to_token_stream(),
             false => match self.value {
                 Value::Vec { .. } => quote! {(#ident.len() as u32)},
-                Value::Delegated { .. } => quote! {(#ident.byte_len() as u32)},
+                Value::Delegated { .. } => return quote! {},
                 _ => unreachable!(),
             },
         };
@@ -184,8 +186,6 @@ impl Field {
 
 #[derive(Debug, PartialEq, Clone, Assoc)]
 #[func(fn name(&self) -> TokenStream2)]
-#[func(pub fn min_variable_byte_len(&self) -> TokenStream2 {quote! {}})]
-#[func(pub fn max_variable_byte_len(&self) -> TokenStream2 {quote! {}})]
 #[func(fn length(&self, field: TokenStream2) -> ByteLen)]
 pub enum Value {
     #[assoc(name = quote! {bool}, length = ByteLen::fully_static(1))]
@@ -224,10 +224,12 @@ pub enum Value {
     I128,
     #[assoc(
         name = quote! {Vec<#_ty>}.to_token_stream(),
-        max_variable_byte_len = quote! {+ #_max_length * <#_ty>::MAX_BYTE_LEN},
         length = ByteLen::known_fixed_unknown_length(
             4,
-            quote! {#_max_length * <#_ty>::MAX_BYTE_LEN},
+            {
+                let max_len = _ty.length(quote! {}).as_const_max_length();
+                quote! {#_max_length * (#max_len)}
+            },
             quote! {#field.iter().fold(0, |acc, item| {acc + item.byte_len()})}
         )
     )]

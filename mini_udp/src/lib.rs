@@ -232,6 +232,37 @@ mod test {
         );
     }
 
+    #[test]
+    fn vector() {
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct A {
+            list: Vec<u8>,
+        }
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct B(f64);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct C {
+            a: Vec<bool>,
+            b: Vec<B>,
+        }
+
+        crate::test_bitrepr_roundtrip!(
+            a,
+            A,
+            A {
+                list: vec![183, 1, 99, 254]
+            }
+        );
+        crate::test_bitrepr_roundtrip!(
+            c,
+            C,
+            C {
+                a: vec![true, false, false, false, true, false],
+                b: vec![B(f32::MAX as f64), B(f64::MIN), B(-0.005), B(01208402.2432)]
+            }
+        );
+    }
+
     #[macro_export]
     macro_rules! test_bitrepr_roundtrip {
         ($binding:ident, $ty:ident, $init:expr) => {
