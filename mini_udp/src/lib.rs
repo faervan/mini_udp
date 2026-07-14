@@ -1,9 +1,11 @@
 extern crate self as mini_udp;
 
 mod byte_repr;
+pub use byte_repr::{ByteRepr, ByteReprError};
+
 mod packet;
 mod packet_ack;
-mod prelude;
+pub mod prelude;
 mod ring_buffer;
 mod sender;
 
