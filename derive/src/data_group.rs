@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{ToTokens, quote};
 
-use crate::data2::{ByteLen, Context, Field, FieldIdentifier, Value};
+use crate::data::{ByteLen, Context, Field, FieldIdentifier, Value};
 
 pub struct Fields {
     ident: TokenStream2,
@@ -110,24 +110,6 @@ impl Fields {
 
     pub fn length(&self) -> ByteLen {
         self.fields.iter().map(Field::length).sum()
-    }
-
-    pub fn min_variable_byte_len(&self) -> TokenStream2 {
-        self.fields
-            .iter()
-            .map(|field| field.value.min_variable_byte_len())
-            .collect()
-    }
-
-    pub fn max_variable_byte_len(&self) -> TokenStream2 {
-        self.fields
-            .iter()
-            .map(|field| field.value.max_variable_byte_len())
-            .collect()
-    }
-
-    pub fn variable_byte_len(&self) -> TokenStream2 {
-        self.fields.iter().map(Field::variable_byte_len).collect()
     }
 
     pub fn binding(&self) -> TokenStream2 {
