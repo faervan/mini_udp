@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-#[derive(Debug, BitRepr)]
+#[derive(Debug, ByteRepr)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(super) struct PacketAck {
     /// The id of the [`super::Packet`] with which this [`PacketAck`] is send
@@ -11,11 +11,11 @@ pub(super) struct PacketAck {
     ack_bits: u32,
 }
 
-impl StaticBitRepr for PacketAck {
-    const BIT_LEN: usize = PacketAck::MIN_BIT_LEN;
+impl StaticByteRepr for PacketAck {
+    const BYTE_LEN: usize = PacketAck::MIN_BYTE_LEN;
 }
 
-impl<M: BitRepr> UdpCommunicator<M> {
+impl<M: ByteRepr> UdpCommunicator<M> {
     pub(super) fn acknowledge(&mut self, ack: PacketAck) {
         for i in 0..32 {
             if ack.ack_bits & 1 << i != 0 {

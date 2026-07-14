@@ -2,20 +2,20 @@ use std::array::TryFromSliceError;
 
 use thiserror::Error;
 
-pub trait StaticBitRepr {
-    const BIT_LEN: usize;
+pub trait StaticByteRepr {
+    const BYTE_LEN: usize;
 }
 
-pub trait BitRepr: Sized {
-    const MIN_BIT_LEN: usize;
-    const MAX_BIT_LEN: usize;
-    fn bit_len(&self) -> usize;
-    /// The number of bytes written on success is equal to `self.bit_len()`
-    fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), BitReprError>;
-    fn from_bytes(bytes: &[u8]) -> Result<Self, BitReprError>;
+pub trait ByteRepr: Sized {
+    const MIN_BYTE_LEN: usize;
+    const MAX_BYTE_LEN: usize;
+    fn byte_len(&self) -> usize;
+    /// The number of bytes written on success is equal to `self.byte_len()`
+    fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), ByteReprError>;
+    fn from_bytes(bytes: &[u8]) -> Result<Self, ByteReprError>;
 }
 
-pub trait BitReprExt: BitRepr {
+pub trait ByteReprExt: ByteRepr {
     /// Writes all items of `v` into `bytes`.
     /// Returns the number of items of `v` that fit into and have been written to `bytes`, as well
     /// as the length of all those items combined in bytes.
@@ -28,10 +28,10 @@ pub trait BitReprExt: BitRepr {
         let mut ptr = 0;
         let mut i = 0;
         for v in values {
-            if bytes.len() - ptr < v.bit_len() || v.write_to_bytes(&mut bytes[ptr..]).is_err() {
+            if bytes.len() - ptr < v.byte_len() || v.write_to_bytes(&mut bytes[ptr..]).is_err() {
                 return (i, ptr);
             }
-            ptr += v.bit_len();
+            ptr += v.byte_len();
             i += 1;
         }
         (i, ptr)
@@ -43,7 +43,7 @@ pub trait BitReprExt: BitRepr {
         while bytes.len() > ptr {
             match Self::from_bytes(&bytes[ptr..]) {
                 Ok(v) => {
-                    ptr += v.bit_len();
+                    ptr += v.byte_len();
                     out.push(v);
                 }
                 Err(e) => {
@@ -57,17 +57,17 @@ pub trait BitReprExt: BitRepr {
     }
 }
 
-impl<T: BitRepr> BitReprExt for T {}
+impl<T: ByteRepr> ByteReprExt for T {}
 
 #[derive(Error, Debug)]
-pub enum BitReprError {
+pub enum ByteReprError {
     #[error("The provided byte slice is too short")]
     SliceTooShort,
     #[error("Encountered an unexpected value")]
     InvalidValue,
 }
 
-impl From<TryFromSliceError> for BitReprError {
+impl From<TryFromSliceError> for ByteReprError {
     fn from(_value: TryFromSliceError) -> Self {
         Self::SliceTooShort
     }

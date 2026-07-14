@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    BitRepr,
+    ByteRepr,
     packet::{MAX_PACKET_LEN, Packet},
     ring_buffer::RingBuffer,
 };
@@ -32,12 +32,12 @@ pub trait CommunicatorSocket {
     fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<(), std::io::Error>;
 }
 
-pub trait Communicator<M: BitRepr> {
+pub trait Communicator<M: ByteRepr> {
     fn write(&mut self, message: M);
     fn read(&mut self) -> Option<M>;
 }
 
-pub struct MultiUdpCommunicator<M: BitRepr> {
+pub struct MultiUdpCommunicator<M: ByteRepr> {
     socket: Arc<UdpCommunicatorSocket>,
     coms: HashMap<SocketAddr, UdpCommunicator<M, Arc<UdpCommunicatorSocket>>>,
 }
@@ -51,7 +51,7 @@ pub struct UdpCommunicatorSocket {
     debug_logs: bool,
 }
 
-pub struct UdpCommunicator<M: BitRepr, SOCKET: MaybeOwnedSocket = UdpCommunicatorSocket> {
+pub struct UdpCommunicator<M: ByteRepr, SOCKET: MaybeOwnedSocket = UdpCommunicatorSocket> {
     socket: SOCKET,
     pub(crate) reliable_send_packets: RingBuffer<(Instant, Packet<M>)>,
     unreliable_send_packet_id: u16,
@@ -64,7 +64,7 @@ pub struct UdpCommunicator<M: BitRepr, SOCKET: MaybeOwnedSocket = UdpCommunicato
     received_packet_duplicate: bool,
 }
 
-impl<M: BitRepr> Default for UdpCommunicator<M> {
+impl<M: ByteRepr> Default for UdpCommunicator<M> {
     fn default() -> Self {
         Self::bind("0.0.0.0:0")
     }
@@ -91,7 +91,7 @@ impl CommunicatorSocket for UdpCommunicatorSocket {
     }
 }
 
-impl<M: BitRepr> CommunicatorSocket for UdpCommunicator<M> {
+impl<M: ByteRepr> CommunicatorSocket for UdpCommunicator<M> {
     fn bind<A: ToSocketAddrs>(addr: A) -> Self {
         Self {
             socket: UdpCommunicatorSocket::bind(addr),
@@ -110,7 +110,7 @@ impl<M: BitRepr> CommunicatorSocket for UdpCommunicator<M> {
     }
 }
 
-impl<M: BitRepr> CommunicatorSocket for MultiUdpCommunicator<M> {
+impl<M: ByteRepr> CommunicatorSocket for MultiUdpCommunicator<M> {
     fn bind<A: ToSocketAddrs>(addr: A) -> Self {
         Self {
             socket: Arc::new(UdpCommunicatorSocket::bind(addr)),
@@ -123,7 +123,7 @@ impl<M: BitRepr> CommunicatorSocket for MultiUdpCommunicator<M> {
     }
 }
 
-impl<M: BitRepr> Communicator<M> for UdpCommunicator<M> {
+impl<M: ByteRepr> Communicator<M> for UdpCommunicator<M> {
     #[inline(always)]
     fn write(&mut self, message: M) {
         self.msg_send_queue.push_back(message);
@@ -135,7 +135,7 @@ impl<M: BitRepr> Communicator<M> for UdpCommunicator<M> {
     }
 }
 
-impl<M: BitRepr> UdpCommunicator<M> {
+impl<M: ByteRepr> UdpCommunicator<M> {
     #[cfg(test)]
     fn with_fake_unreliablity(mut self) -> Self {
         self.socket.fake_unreliable = true;
@@ -149,7 +149,7 @@ impl<M: BitRepr> UdpCommunicator<M> {
     }
 }
 
-impl<M: BitRepr> MultiUdpCommunicator<M> {
+impl<M: ByteRepr> MultiUdpCommunicator<M> {
     #[cfg(test)]
     fn with_fake_unreliablity(mut self) -> Self {
         let mut socket = Arc::into_inner(self.socket).unwrap();

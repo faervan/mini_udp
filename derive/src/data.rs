@@ -40,7 +40,8 @@ impl Field {
         let length = self.length();
         if length.fixed_bytes == 1 {
             let byte = self.byte_offset;
-            let access = quote! {*bytes.get(#byte).ok_or(::mini_udp::BitReprError::SliceTooShort)?};
+            let access =
+                quote! {*bytes.get(#byte).ok_or(::mini_udp::ByteReprError::SliceTooShort)?};
             let value = match &self.value {
                 Value::Bool => quote! {#access == 1},
                 Value::U8 => access,
@@ -55,7 +56,7 @@ impl Field {
         let byte_end = byte_start + len;
         let bytes = quote! {
             TryInto::<[u8; #len]>::try_into(&bytes[#byte_start..#byte_end])
-                .map_err(|_| ::mini_udp::BitReprError::SliceTooShort)?
+                .map_err(|_| ::mini_udp::ByteReprError::SliceTooShort)?
         };
         if length.is_static() {
             let ident = syn::Ident::from(&self.ident);
@@ -80,7 +81,7 @@ impl Field {
             Value::Delegated { ty } => {
                 quote! {
                     let #ident = <#ty>::from_bytes(&bytes[byte_ptr..])?;
-                    byte_ptr += #ident.bit_len();
+                    byte_ptr += #ident.byte_len();
                 }
             }
             Value::Vec { ty, .. } => {
@@ -88,7 +89,7 @@ impl Field {
                     let mut #ident = vec![];
                     for i in 0..#fixed_ident {
                         let item = <#ty>::from_bytes(&bytes[byte_ptr..])?;
-                        byte_ptr += item.bit_len();
+                        byte_ptr += item.byte_len();
                         #ident.push(item);
                     }
                 }
@@ -103,7 +104,7 @@ impl Field {
         if length.fixed_bytes == 1 {
             let byte = self.byte_offset;
             let access =
-                quote! {*bytes.get_mut(#byte).ok_or(::mini_udp::BitReprError::SliceTooShort)?};
+                quote! {*bytes.get_mut(#byte).ok_or(::mini_udp::ByteReprError::SliceTooShort)?};
             let byte_value = match &self.value {
                 Value::Bool => quote! {if *#ident {1} else {0}},
                 Value::U8 => quote! {*#ident},
@@ -125,7 +126,7 @@ impl Field {
             true => ident.to_token_stream(),
             false => match self.value {
                 Value::Vec { .. } => quote! {(#ident.len() as u32)},
-                Value::Delegated { .. } => quote! {(#ident.bit_len() as u32)},
+                Value::Delegated { .. } => quote! {(#ident.byte_len() as u32)},
                 _ => unreachable!(),
             },
         };
@@ -144,14 +145,14 @@ impl Field {
             Value::Delegated { .. } => {
                 quote! {
                     #ident.write_to_bytes(&mut bytes[byte_ptr..])?;
-                    byte_ptr += #ident.bit_len();
+                    byte_ptr += #ident.byte_len();
                 }
             }
             Value::Vec { .. } => {
                 quote! {
                     for item in #ident.iter() {
                         item.write_to_bytes(&mut bytes[byte_ptr..])?;
-                        byte_ptr += item.bit_len();
+                        byte_ptr += item.byte_len();
                     }
                 }
             }
@@ -223,22 +224,22 @@ pub enum Value {
     I128,
     #[assoc(
         name = quote! {Vec<#_ty>}.to_token_stream(),
-        max_variable_byte_len = quote! {+ #_max_length * <#_ty>::MAX_BIT_LEN},
+        max_variable_byte_len = quote! {+ #_max_length * <#_ty>::MAX_BYTE_LEN},
         length = ByteLen::known_fixed_unknown_length(
             4,
-            quote! {#_max_length * <#_ty>::MAX_BIT_LEN},
-            quote! {#field.iter().fold(0, |acc, item| {acc + item.bit_len()})}
+            quote! {#_max_length * <#_ty>::MAX_BYTE_LEN},
+            quote! {#field.iter().fold(0, |acc, item| {acc + item.byte_len()})}
         )
     )]
     Vec { ty: Box<Self>, max_length: usize },
     #[assoc(
         name = _ty.to_token_stream(),
-        min_variable_byte_len = quote! {+ <#_ty>::MIN_BIT_LEN},
-        max_variable_byte_len = quote! {+ <#_ty>::MAX_BIT_LEN},
+        min_variable_byte_len = quote! {+ <#_ty>::MIN_BYTE_LEN},
+        max_variable_byte_len = quote! {+ <#_ty>::MAX_BYTE_LEN},
         length = ByteLen::fully_unknown(
-            quote! {<#_ty>::MIN_BIT_LEN},
-            quote! {<#_ty>::MAX_BIT_LEN},
-            quote! {#field.bit_len()}
+            quote! {<#_ty>::MIN_BYTE_LEN},
+            quote! {<#_ty>::MAX_BYTE_LEN},
+            quote! {#field.byte_len()}
         )
     )]
     Delegated { ty: Box<syn::Type> },

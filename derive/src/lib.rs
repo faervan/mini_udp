@@ -8,10 +8,10 @@ use crate::{data::Context, data_group::Fields};
 mod data;
 mod data_group;
 
-#[proc_macro_derive(BitRepr)]
+#[proc_macro_derive(ByteRepr)]
 pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(token_input as DeriveInput);
-    let BitReprImpl {
+    let ByteReprImpl {
         min_len,
         max_len,
         f_len,
@@ -33,22 +33,22 @@ pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let ident = input.ident;
     quote! {
-        impl #impl_generics ::mini_udp::BitRepr for #ident #ty_generics #where_clause {
-            const MIN_BIT_LEN: usize = #min_len;
-            const MAX_BIT_LEN: usize = #max_len;
-            fn bit_len(&self) -> usize {
+        impl #impl_generics ::mini_udp::ByteRepr for #ident #ty_generics #where_clause {
+            const MIN_BYTE_LEN: usize = #min_len;
+            const MAX_BYTE_LEN: usize = #max_len;
+            fn byte_len(&self) -> usize {
                 #f_len
             }
-            fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), ::mini_udp::BitReprError> {
+            fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), ::mini_udp::ByteReprError> {
                 #[cfg(debug_assertions)]
-                if cfg!(debug_assertions) && Self::MIN_BIT_LEN == 0 {
+                if cfg!(debug_assertions) && Self::MIN_BYTE_LEN == 0 {
                     ::mini_udp::tracing::warn!("Serializing a zero-sized type is not meaningful!");
                 }
                 #f_write_to_bytes
             }
-            fn from_bytes(bytes: &[u8]) -> Result<Self, ::mini_udp::BitReprError> {
+            fn from_bytes(bytes: &[u8]) -> Result<Self, ::mini_udp::ByteReprError> {
                 #[cfg(debug_assertions)]
-                if cfg!(debug_assertions) && Self::MIN_BIT_LEN == 0 {
+                if cfg!(debug_assertions) && Self::MIN_BYTE_LEN == 0 {
                     ::mini_udp::tracing::warn!("Deserializing a zero-sized type is not meaningful!");
                 }
                 #f_from_bytes
@@ -58,7 +58,7 @@ pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
     .into()
 }
 
-struct BitReprImpl {
+struct ByteReprImpl {
     min_len: TokenStream2,
     max_len: TokenStream2,
     f_len: TokenStream2,
@@ -66,14 +66,14 @@ struct BitReprImpl {
     f_from_bytes: TokenStream2,
 }
 
-fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<BitReprImpl, TokenStream> {
+fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<ByteReprImpl, TokenStream> {
     let mut context = Context::default();
     let values = Fields::new(ident, &data.fields, None, &mut context);
     let read = values.read();
     let write = values.write();
     let length = values.length();
 
-    Ok(BitReprImpl {
+    Ok(ByteReprImpl {
         f_len: length.as_length(),
         min_len: length.as_const_min_length(),
         max_len: length.as_const_max_length(),
@@ -85,14 +85,14 @@ fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<BitReprIm
     })
 }
 
-fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<BitReprImpl, TokenStream> {
+fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<ByteReprImpl, TokenStream> {
     // Get the amount of bits needed to represent all variants
-    let variant_bit_len = match data.variants.len() {
+    let variant_byte_len = match data.variants.len() {
         0 | 1 => 0,
         len => (len - 1).ilog2() + 1,
     };
-    let variant_bit_len: usize = variant_bit_len.try_into().unwrap();
-    let variant_len = (variant_bit_len as f32 / 8.).ceil() as usize;
+    let variant_byte_len: usize = variant_byte_len.try_into().unwrap();
+    let variant_len = (variant_byte_len as f32 / 8.).ceil() as usize;
 
     let data_access_type = match data.variants.len() {
         0 => {
@@ -179,7 +179,7 @@ fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<BitReprImpl, 
         false => quote! {
             Ok(match #access {
                 #read
-                _ => return Err(::mini_udp::BitReprError::InvalidValue),
+                _ => return Err(::mini_udp::ByteReprError::InvalidValue),
             })
         },
     };
@@ -201,7 +201,7 @@ fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<BitReprImpl, 
             #match_len
         }) + #variant_len
     };
-    Ok(BitReprImpl {
+    Ok(ByteReprImpl {
         min_len: lowest_min_len(&variants, variant_len),
         max_len: lowest_max_len(&variants, variant_len),
         f_len,
@@ -302,7 +302,7 @@ impl DataAccess {
             (DataAccessType::U32, true) => quote! {&mut #slice[#byte..#byte + 4]},
         };
         let handle_err = match self.ty {
-            DataAccessType::U8 => quote! {.ok_or(::mini_udp::BitReprError::SliceTooShort)},
+            DataAccessType::U8 => quote! {.ok_or(::mini_udp::ByteReprError::SliceTooShort)},
             DataAccessType::U16 | DataAccessType::U32 => quote! {.try_into()},
         };
         quote! {
