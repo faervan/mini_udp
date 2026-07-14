@@ -68,8 +68,8 @@ impl<M: BitRepr> BitRepr for Packet<M> {
     }
     fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), BitReprError> {
         self.ack
-            .write_to_bytes(&mut bytes[4..4 + PacketAck::BIT_LEN]);
-        let reliable = (self.reliable as u8) << 0;
+            .write_to_bytes(&mut bytes[4..4 + PacketAck::BIT_LEN])?;
+        let reliable = self.reliable as u8;
         let ordered = (self.ordered as u8) << 1;
         bytes[4 + PacketAck::BIT_LEN] = reliable | ordered;
         let (_items_written, bytes_written) =
