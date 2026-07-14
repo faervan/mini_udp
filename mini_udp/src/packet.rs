@@ -1,7 +1,4 @@
-use crate::{
-    BitRepr, BitReprError, bit_repr::BitReprExt as _, bit_repr::StaticBitRepr as _,
-    packet_ack::PacketAck,
-};
+use crate::prelude::*;
 
 /// The maximum allowed length of the data part of a UDP packet.
 /// The total maximum length is computed by adding the header length as well.
@@ -106,8 +103,7 @@ impl<M: BitRepr> BitRepr for Packet<M> {
     }
 }
 
-#[derive(Debug, PartialEq, Hash, Eq, Clone, Copy)]
-#[cfg_attr(feature = "byteable", derive(byteable::Byteable))]
+#[derive(BitRepr, Debug, PartialEq, Hash, Eq, Clone, Copy)]
 pub enum InnerUdpMessage {
     Hello,
     Wave(u16),

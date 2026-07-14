@@ -13,8 +13,8 @@ mini_udp_derive.path = "derive"
 crc = "3.4"
 rand = "0.10"
 ringbuffer = { version = "0.16", default-features = false }
-byteable = "0.32"
 
+tracing = "0.1"
 thiserror = "2"
 enum-assoc = "1.3"
 

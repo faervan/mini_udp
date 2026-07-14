@@ -10,6 +10,7 @@ pub trait BitRepr: Sized {
     const MIN_BIT_LEN: usize;
     const MAX_BIT_LEN: usize;
     fn bit_len(&self) -> usize;
+    /// The number of bytes written on success is equal to `self.bit_len()`
     fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), BitReprError>;
     fn from_bytes(bytes: &[u8]) -> Result<Self, BitReprError>;
 }
@@ -69,24 +70,5 @@ pub enum BitReprError {
 impl From<TryFromSliceError> for BitReprError {
     fn from(_value: TryFromSliceError) -> Self {
         Self::SliceTooShort
-    }
-}
-
-#[cfg(feature = "byteable")]
-impl<T: byteable::Readable + byteable::Writable> BitRepr for T {
-    const MIN_BIT_LEN: usize = 0;
-    /// TODO!
-    const MAX_BIT_LEN: usize = 1000;
-    fn bit_len(&self) -> usize {
-        unimplemented!()
-    }
-    fn write_to_bytes(&self, mut bytes: &mut [u8]) -> Result<(), BitReprError> {
-        use byteable::WriteValue as _;
-        bytes.write_value(self).unwrap();
-        Ok(())
-    }
-    fn from_bytes(mut bytes: &[u8]) -> Result<Self, BitReprError> {
-        use byteable::ReadValue as _;
-        bytes.read_value().map_err(|_| BitReprError::InvalidValue)
     }
 }

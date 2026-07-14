@@ -1,10 +1,7 @@
-use byteable::IntoByteArray;
+use crate::prelude::*;
 
-use crate::{BitRepr, bit_repr::StaticBitRepr, sender::UdpCommunicator};
-
-#[derive(Debug)]
+#[derive(Debug, BitRepr)]
 #[cfg_attr(test, derive(PartialEq))]
-#[cfg_attr(feature = "byteable", derive(byteable::Byteable))]
 pub(super) struct PacketAck {
     /// The id of the [`super::Packet`] with which this [`PacketAck`] is send
     pub(super) sequence_id: u16,
@@ -15,7 +12,7 @@ pub(super) struct PacketAck {
 }
 
 impl StaticBitRepr for PacketAck {
-    const BIT_LEN: usize = PacketAck::BYTE_SIZE;
+    const BIT_LEN: usize = PacketAck::MIN_BIT_LEN;
 }
 
 impl<M: BitRepr> UdpCommunicator<M> {
