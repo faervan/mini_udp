@@ -130,6 +130,9 @@ mod test {
         );
         let mut buf = [0; Packet::<InnerUdpMessage>::MAX_BIT_LEN];
         assert!(packet.write_to_bytes(&mut buf).is_ok());
-        assert_eq!(Packet::<InnerUdpMessage>::from_bytes(&buf).unwrap(), packet);
+        assert_eq!(
+            Packet::<InnerUdpMessage>::from_bytes(&buf[..packet.bit_len()]).unwrap(),
+            packet
+        );
     }
 }
