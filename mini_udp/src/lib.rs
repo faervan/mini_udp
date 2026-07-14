@@ -221,6 +221,15 @@ mod test {
         }
         #[derive(BitRepr, PartialEq, Debug)]
         struct B(u128);
+
+        crate::test_bitrepr_roundtrip!(
+            a,
+            A,
+            A {
+                x: -2409406.3353,
+                y: B(3908221)
+            }
+        );
     }
 
     #[macro_export]

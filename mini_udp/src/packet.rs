@@ -22,7 +22,7 @@ const CRC_ALGORITHM: crc::Algorithm<u32> = crc::Algorithm {
 };
 const CRC: crc::Crc<u32> = crc::Crc::<u32>::new(&CRC_ALGORITHM);
 
-#[derive(Debug)]
+#[derive(BitRepr, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct Packet<M: BitRepr> {
     pub(super) ack: PacketAck,
@@ -56,52 +56,52 @@ impl<M: BitRepr> Packet<M> {
     }
 }
 
-impl<M: BitRepr> BitRepr for Packet<M> {
-    const MIN_BIT_LEN: usize = PACKET_HEADER_LEN + M::MIN_BIT_LEN;
-    const MAX_BIT_LEN: usize = MAX_PACKET_LEN;
-    fn bit_len(&self) -> usize {
-        PACKET_HEADER_LEN
-            + self.messages.iter().fold(0, |mut acc, m| {
-                acc += m.bit_len();
-                acc
-            })
-    }
-    fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), BitReprError> {
-        self.ack
-            .write_to_bytes(&mut bytes[4..4 + PacketAck::BIT_LEN])?;
-        let reliable = self.reliable as u8;
-        let ordered = (self.ordered as u8) << 1;
-        bytes[4 + PacketAck::BIT_LEN] = reliable | ordered;
-        let (_items_written, bytes_written) =
-            M::write_many(&self.messages, &mut bytes[PACKET_HEADER_LEN..]);
-        let crc = CRC
-            .checksum(&bytes[4..PACKET_HEADER_LEN + bytes_written])
-            .to_le_bytes();
-        bytes[..4].copy_from_slice(&crc);
-        Ok(())
-    }
-    fn from_bytes(bytes: &[u8]) -> Result<Self, BitReprError> {
-        let (messages, body_len) = M::read_many(&bytes[PACKET_HEADER_LEN..]);
-
-        let crc = u32::from_le_bytes(bytes[..4].try_into()?);
-        if CRC.checksum(&bytes[4..PACKET_HEADER_LEN + body_len]) != crc {
-            return Err(BitReprError::InvalidValue);
-        }
-
-        let meta_byte = bytes
-            .get(4 + PacketAck::BIT_LEN)
-            .ok_or(BitReprError::InvalidValue)?;
-        let reliable = meta_byte & 1 << 0 != 0;
-        let ordered = meta_byte & 1 << 1 != 0;
-
-        Ok(Self {
-            ack: PacketAck::from_bytes(&bytes[4..4 + PacketAck::BIT_LEN])?,
-            reliable,
-            ordered,
-            messages,
-        })
-    }
-}
+// impl<M: BitRepr> BitRepr for Packet<M> {
+//     const MIN_BIT_LEN: usize = PACKET_HEADER_LEN + M::MIN_BIT_LEN;
+//     const MAX_BIT_LEN: usize = MAX_PACKET_LEN;
+//     fn bit_len(&self) -> usize {
+//         PACKET_HEADER_LEN
+//             + self.messages.iter().fold(0, |mut acc, m| {
+//                 acc += m.bit_len();
+//                 acc
+//             })
+//     }
+//     fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), BitReprError> {
+//         self.ack
+//             .write_to_bytes(&mut bytes[4..4 + PacketAck::BIT_LEN])?;
+//         let reliable = self.reliable as u8;
+//         let ordered = (self.ordered as u8) << 1;
+//         bytes[4 + PacketAck::BIT_LEN] = reliable | ordered;
+//         let (_items_written, bytes_written) =
+//             M::write_many(&self.messages, &mut bytes[PACKET_HEADER_LEN..]);
+//         let crc = CRC
+//             .checksum(&bytes[4..PACKET_HEADER_LEN + bytes_written])
+//             .to_le_bytes();
+//         bytes[..4].copy_from_slice(&crc);
+//         Ok(())
+//     }
+//     fn from_bytes(bytes: &[u8]) -> Result<Self, BitReprError> {
+//         let (messages, body_len) = M::read_many(&bytes[PACKET_HEADER_LEN..]);
+//
+//         let crc = u32::from_le_bytes(bytes[..4].try_into()?);
+//         if CRC.checksum(&bytes[4..PACKET_HEADER_LEN + body_len]) != crc {
+//             return Err(BitReprError::InvalidValue);
+//         }
+//
+//         let meta_byte = bytes
+//             .get(4 + PacketAck::BIT_LEN)
+//             .ok_or(BitReprError::InvalidValue)?;
+//         let reliable = meta_byte & 1 << 0 != 0;
+//         let ordered = meta_byte & 1 << 1 != 0;
+//
+//         Ok(Self {
+//             ack: PacketAck::from_bytes(&bytes[4..4 + PacketAck::BIT_LEN])?,
+//             reliable,
+//             ordered,
+//             messages,
+//         })
+//     }
+// }
 
 #[derive(BitRepr, Debug, PartialEq, Hash, Eq, Clone, Copy)]
 pub enum InnerUdpMessage {
@@ -128,6 +128,8 @@ mod test {
                 InnerUdpMessage::Hello,
             ],
         );
+        assert_eq!(crate::PacketAck::MIN_BIT_LEN, 8);
+        assert_eq!(Packet::<InnerUdpMessage>::MIN_BIT_LEN, 14);
         let mut buf = [0; Packet::<InnerUdpMessage>::MAX_BIT_LEN];
         assert!(packet.write_to_bytes(&mut buf).is_ok());
         assert_eq!(

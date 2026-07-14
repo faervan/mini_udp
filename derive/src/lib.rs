@@ -215,7 +215,7 @@ fn lowest_min_len(variants: &[Fields], variant_len: usize) -> TokenStream2 {
         .iter()
         .map(|f| f.length())
         .filter(|f| f.unknown_min.is_empty())
-        .map(|f| f.min_length)
+        .map(|f| f.known_min_length())
         .min()
         .unwrap_or(usize::MAX);
     if variants.iter().all(|f| f.length().unknown_min.is_empty()) {
@@ -238,7 +238,7 @@ fn lowest_max_len(variants: &[Fields], variant_len: usize) -> TokenStream2 {
         .iter()
         .map(|f| f.length())
         .filter(|f| f.unknown_max.is_empty())
-        .map(|f| f.max_length)
+        .map(|f| f.known_max_length())
         .max()
         .unwrap_or_default();
     if variants.iter().all(|f| f.length().unknown_max.is_empty()) {
