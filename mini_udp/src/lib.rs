@@ -24,16 +24,19 @@ mod test {
         struct AA {}
         assert_eq!(AA::MIN_BYTE_LEN, 0);
         assert_eq!(AA::MAX_BYTE_LEN, 0);
+        assert_eq!(AA {}.byte_len(), 0);
 
         #[derive(ByteRepr)]
         struct AB();
         assert_eq!(AB::MIN_BYTE_LEN, 0);
         assert_eq!(AB::MAX_BYTE_LEN, 0);
+        assert_eq!(AB().byte_len(), 0);
 
         #[derive(ByteRepr)]
         struct AC;
         assert_eq!(AC::MIN_BYTE_LEN, 0);
         assert_eq!(AC::MAX_BYTE_LEN, 0);
+        assert_eq!(AC.byte_len(), 0);
 
         #[derive(ByteRepr)]
         enum AD {
@@ -41,6 +44,7 @@ mod test {
         }
         assert_eq!(AD::MIN_BYTE_LEN, 0);
         assert_eq!(AD::MAX_BYTE_LEN, 0);
+        assert_eq!(AD::A.byte_len(), 0);
 
         #[derive(ByteRepr)]
         struct BA {
@@ -48,11 +52,21 @@ mod test {
         }
         assert_eq!(BA::MIN_BYTE_LEN, 1);
         assert_eq!(BA::MAX_BYTE_LEN, 1);
+        assert_eq!(BA { n: 0 }.byte_len(), 1);
+        assert_eq!(BA { n: 1 }.byte_len(), 1);
+        assert_eq!(BA { n: 42 }.byte_len(), 1);
+        assert_eq!(BA { n: 127 }.byte_len(), 1);
+        assert_eq!(BA { n: 255 }.byte_len(), 1);
 
         #[derive(ByteRepr)]
         struct BB(u8);
         assert_eq!(BB::MIN_BYTE_LEN, 1);
         assert_eq!(BB::MAX_BYTE_LEN, 1);
+        assert_eq!(BB(0).byte_len(), 1);
+        assert_eq!(BB(1).byte_len(), 1);
+        assert_eq!(BB(42).byte_len(), 1);
+        assert_eq!(BB(128).byte_len(), 1);
+        assert_eq!(BB(255).byte_len(), 1);
 
         #[derive(ByteRepr)]
         enum BC {
@@ -60,6 +74,11 @@ mod test {
         }
         assert_eq!(BC::MIN_BYTE_LEN, 1);
         assert_eq!(BC::MAX_BYTE_LEN, 1);
+        assert_eq!(BC::A(0).byte_len(), 1);
+        assert_eq!(BC::A(1).byte_len(), 1);
+        assert_eq!(BC::A(17).byte_len(), 1);
+        assert_eq!(BC::A(99).byte_len(), 1);
+        assert_eq!(BC::A(255).byte_len(), 1);
 
         #[derive(ByteRepr)]
         struct CA {
@@ -69,11 +88,61 @@ mod test {
         }
         assert_eq!(CA::MIN_BYTE_LEN, 21);
         assert_eq!(CA::MAX_BYTE_LEN, 21);
+        assert_eq!(
+            CA {
+                named: 0.0,
+                unnamed: false,
+                b: 0
+            }
+            .byte_len(),
+            21
+        );
+        assert_eq!(
+            CA {
+                named: 1.0,
+                unnamed: true,
+                b: 1
+            }
+            .byte_len(),
+            21
+        );
+        assert_eq!(
+            CA {
+                named: -3.5,
+                unnamed: false,
+                b: 42
+            }
+            .byte_len(),
+            21
+        );
+        assert_eq!(
+            CA {
+                named: 7.25,
+                unnamed: true,
+                b: 123456
+            }
+            .byte_len(),
+            21
+        );
+        assert_eq!(
+            CA {
+                named: f32::INFINITY,
+                unnamed: false,
+                b: u128::MAX
+            }
+            .byte_len(),
+            21
+        );
 
         #[derive(ByteRepr)]
         struct CB(i64, i8);
         assert_eq!(CB::MIN_BYTE_LEN, 9);
         assert_eq!(CB::MAX_BYTE_LEN, 9);
+        assert_eq!(CB(0, 0).byte_len(), 9);
+        assert_eq!(CB(1, 1).byte_len(), 9);
+        assert_eq!(CB(-1, -1).byte_len(), 9);
+        assert_eq!(CB(i64::MIN, i8::MIN).byte_len(), 9);
+        assert_eq!(CB(i64::MAX, i8::MAX).byte_len(), 9);
 
         #[derive(ByteRepr)]
         enum CC {
@@ -83,11 +152,21 @@ mod test {
         }
         assert_eq!(CC::MIN_BYTE_LEN, 4);
         assert_eq!(CC::MAX_BYTE_LEN, 17);
+        assert_eq!(CC::A { x: 0 }.byte_len(), 5);
+        assert_eq!(CC::A { x: u32::MAX }.byte_len(), 5);
+        assert_eq!(CC::B(false, 0).byte_len(), 4);
+        assert_eq!(CC::B(true, u16::MAX).byte_len(), 4);
+        assert_eq!(CC::C(i128::MIN).byte_len(), 17);
 
         #[derive(ByteRepr)]
         struct DA(CC);
         assert_eq!(DA::MIN_BYTE_LEN, 4);
         assert_eq!(DA::MAX_BYTE_LEN, 17);
+        assert_eq!(DA(CC::A { x: 7 }).byte_len(), 5);
+        assert_eq!(DA(CC::B(false, 99)).byte_len(), 4);
+        assert_eq!(DA(CC::B(true, 1234)).byte_len(), 4);
+        assert_eq!(DA(CC::C(0)).byte_len(), 17);
+        assert_eq!(DA(CC::C(i128::MAX)).byte_len(), 17);
 
         #[derive(ByteRepr)]
         struct DB {
@@ -97,6 +176,51 @@ mod test {
         }
         assert_eq!(DB::MIN_BYTE_LEN, 9);
         assert_eq!(DB::MAX_BYTE_LEN, 22);
+        assert_eq!(
+            DB {
+                a: false,
+                b: 0,
+                c: DA(CC::A { x: 0 })
+            }
+            .byte_len(),
+            10
+        );
+        assert_eq!(
+            DB {
+                a: true,
+                b: 1,
+                c: DA(CC::A { x: 1 })
+            }
+            .byte_len(),
+            10
+        );
+        assert_eq!(
+            DB {
+                a: false,
+                b: -1,
+                c: DA(CC::B(true, 42))
+            }
+            .byte_len(),
+            9
+        );
+        assert_eq!(
+            DB {
+                a: true,
+                b: i32::MIN,
+                c: DA(CC::C(5))
+            }
+            .byte_len(),
+            22
+        );
+        assert_eq!(
+            DB {
+                a: false,
+                b: i32::MAX,
+                c: DA(CC::C(i128::MAX))
+            }
+            .byte_len(),
+            22
+        );
 
         #[derive(ByteRepr)]
         enum DC {
@@ -106,6 +230,17 @@ mod test {
         }
         assert_eq!(DC::MIN_BYTE_LEN, 1);
         assert_eq!(DC::MAX_BYTE_LEN, 10);
+        assert_eq!(DC::A.byte_len(), 1);
+        assert_eq!(DC::B(0).byte_len(), 3);
+        assert_eq!(DC::B(u16::MAX).byte_len(), 3);
+        assert_eq!(DC::C { nested: CB(0, 0) }.byte_len(), 10);
+        assert_eq!(
+            DC::C {
+                nested: CB(i64::MIN, i8::MAX)
+            }
+            .byte_len(),
+            10
+        );
 
         #[derive(ByteRepr)]
         enum DD {
@@ -115,6 +250,17 @@ mod test {
         }
         assert_eq!(DD::MIN_BYTE_LEN, 3);
         assert_eq!(DD::MAX_BYTE_LEN, 11);
+        assert_eq!(DD::B(0, false, 0).byte_len(), 11);
+        assert_eq!(DD::B(u64::MAX, true, u8::MAX).byte_len(), 11);
+        assert_eq!(
+            DD::C {
+                nested: CB(123, -5)
+            }
+            .byte_len(),
+            10
+        );
+        assert_eq!(DD::BC(BC::A(0), 0).byte_len(), 3);
+        assert_eq!(DD::BC(BC::A(255), i8::MIN).byte_len(), 3);
 
         #[derive(ByteRepr)]
         enum DE {
@@ -124,6 +270,33 @@ mod test {
         }
         assert_eq!(DE::MIN_BYTE_LEN, 3);
         assert_eq!(DE::MAX_BYTE_LEN, 24);
+        assert_eq!(DE::X(false, BA { n: 0 }, 0).byte_len(), 5);
+        assert_eq!(DE::X(true, BA { n: 255 }, u16::MAX).byte_len(), 5);
+        assert_eq!(
+            DE::Y {
+                fixed: DB {
+                    a: false,
+                    b: 0,
+                    c: DA(CC::A { x: 0 }),
+                },
+                x: 0,
+            }
+            .byte_len(),
+            12
+        );
+        assert_eq!(
+            DE::Y {
+                fixed: DB {
+                    a: true,
+                    b: i32::MAX,
+                    c: DA(CC::C(i128::MAX)),
+                },
+                x: 255,
+            }
+            .byte_len(),
+            24
+        );
+        assert_eq!(DE::Z(true, -48).byte_len(), 3);
 
         #[derive(ByteRepr)]
         enum DF {
@@ -133,6 +306,45 @@ mod test {
         }
         assert_eq!(DF::MIN_BYTE_LEN, 5);
         assert_eq!(DF::MAX_BYTE_LEN, 25);
+        assert_eq!(DF::X(false, BA { n: 0 }, 0).byte_len(), 5);
+        assert_eq!(DF::X(true, BA { n: 1 }, u16::MAX).byte_len(), 5);
+        assert_eq!(
+            DF::Y {
+                fixed: DB {
+                    a: false,
+                    b: 17,
+                    c: DA(CC::B(true, 5)),
+                },
+                x: 9,
+            }
+            .byte_len(),
+            11
+        );
+        assert_eq!(
+            DF::Y {
+                fixed: DB {
+                    a: true,
+                    b: i32::MIN,
+                    c: DA(CC::C(i128::MIN)),
+                },
+                x: 255,
+            }
+            .byte_len(),
+            24
+        );
+        assert_eq!(
+            DF::Z(
+                CA {
+                    named: 3.14,
+                    unnamed: true,
+                    b: 123456789,
+                },
+                -12345,
+                BA { n: 77 },
+            )
+            .byte_len(),
+            25
+        );
     }
 
     #[test]
