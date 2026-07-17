@@ -344,3 +344,97 @@ impl UdpCommunicatorSocket {
         self
     }
 }
+
+#[cfg(test)]
+fn test_init<M>(port_offset: u16) -> (UdpCommunicator<M>, UdpCommunicator<M>)
+where
+    M: ByteRepr,
+{
+    let _ = tracing_subscriber::FmtSubscriber::builder()
+        .with_test_writer()
+        .with_max_level(tracing::Level::DEBUG)
+        .try_init();
+    let localhost = std::net::Ipv4Addr::new(127, 0, 0, 1);
+    let localhost = std::net::IpAddr::V4(localhost);
+    let addr1 = std::net::SocketAddr::new(localhost, port_offset);
+    let addr2 = std::net::SocketAddr::new(localhost, port_offset + 1);
+    let com1 = UdpCommunicator::<M>::bind(addr1);
+    let com2 = UdpCommunicator::<M>::bind(addr2);
+    assert!(com2.connect(addr1).is_ok());
+    assert!(com1.connect(addr2).is_ok());
+    (com1, com2)
+}
+
+#[cfg(test)]
+mod test {
+    use std::{collections::HashSet, time::Duration};
+
+    use tracing::debug;
+
+    use crate::{packet::InnerUdpMessage, prelude::*};
+
+    #[test]
+    fn packet_roundtrip() {
+        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage>(7200);
+        let m1 = InnerUdpMessage::Hello;
+        let m2 = InnerUdpMessage::Wave(1394);
+        com2.write(m1);
+        com2.write(m2);
+        com2.tick().unwrap();
+        com1.tick().unwrap();
+        assert_eq!(com1.read(), Some(m1));
+        assert_eq!(com1.read(), Some(m2));
+        assert_eq!(com1.read(), None);
+    }
+
+    #[test]
+    fn send_until_ack() {
+        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage>(7202);
+        let m1 = InnerUdpMessage::Hello;
+        com2.write(m1);
+        com2.tick().unwrap();
+
+        let mut i = 0;
+        while com2.has_work() {
+            i += 1;
+            com1.tick().unwrap();
+            if let Some(message) = com1.read() {
+                assert_eq!(message, m1);
+                debug!("com1 received: {message:?}");
+                // Send a dummy packet back to acknowledge the received one
+                com1.write(InnerUdpMessage::Wave(1));
+            }
+            com2.tick().unwrap();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(i, 2);
+    }
+
+    #[test]
+    fn test_reliability() {
+        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage>(7204);
+        com1.socket = com1.socket.with_fake_unreliablity().with_debug_logs();
+        com2.socket = com2.socket.with_fake_unreliablity();
+        let mut send = HashSet::new();
+        assert!(send.insert(InnerUdpMessage::Hello));
+        for i in 0..20000 {
+            assert!(send.insert(InnerUdpMessage::Wave(i)));
+        }
+        for m in &send {
+            com1.write(*m);
+        }
+        com1.tick().unwrap();
+
+        let mut received = HashSet::new();
+        while com1.has_work() {
+            com2.tick().unwrap();
+            while let Some(message) = com2.read() {
+                assert!(received.insert(message));
+            }
+            com1.tick().unwrap();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        assert_eq!(received, send);
+    }
+}
