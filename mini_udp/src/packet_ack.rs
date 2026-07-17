@@ -15,7 +15,7 @@ impl StaticByteRepr for PacketAck {
     const BYTE_LEN: usize = PacketAck::MIN_BYTE_LEN;
 }
 
-impl<M: ByteRepr> UdpCommunicator<M> {
+impl<M: ByteRepr> InnerUdpCommunicator<M> {
     pub(super) fn acknowledge(&mut self, ack: PacketAck) {
         for i in 0..32 {
             if ack.ack_bits & 1 << i != 0 {
@@ -41,11 +41,11 @@ impl<M: ByteRepr> UdpCommunicator<M> {
 
 #[cfg(test)]
 mod test {
-    use crate::{packet::InnerUdpMessage, sender::UdpCommunicator};
+    use crate::{packet::InnerUdpMessage, sender::InnerUdpCommunicator};
 
     #[test]
     fn acknowledge() {
-        let mut com = UdpCommunicator::<InnerUdpMessage>::default();
+        let mut com = InnerUdpCommunicator::<InnerUdpMessage>::default();
         // Those two are overridden immediately
         com.received_packets.push(());
         com.received_packets.insert(3, ());

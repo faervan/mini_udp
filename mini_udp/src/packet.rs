@@ -4,7 +4,8 @@ use crate::prelude::*;
 /// The total maximum length is computed by adding the header length as well.
 pub(super) const MAX_PACKET_DATA_LEN: usize = 1024;
 /// 4 bytes for the CRC, then the [`PacketAck`], then 1 byte extra metadata (reliable, ordered)
-pub(super) const PACKET_HEADER_LEN: usize = 4 + PacketAck::BYTE_LEN + 1;
+/// Currently 2 byte extra because booleans do not get combined yet!
+pub(super) const PACKET_HEADER_LEN: usize = 4 + PacketAck::BYTE_LEN + 2; //1;
 /// The maximum allowed length of a UDP packet.
 pub(super) const MAX_PACKET_LEN: usize = PACKET_HEADER_LEN + MAX_PACKET_DATA_LEN;
 
@@ -65,16 +66,15 @@ pub enum InnerUdpMessage {
 #[cfg(test)]
 mod test {
     use crate::{
-        ByteRepr,
         packet::{InnerUdpMessage, Packet},
-        sender::UdpCommunicator,
+        prelude::*,
     };
 
     #[test]
     fn packet_byte_repr() {
         let com = UdpCommunicator::<InnerUdpMessage>::default();
         let packet = Packet::new(
-            com.create_ack(0),
+            com.inner.create_ack(0),
             [
                 InnerUdpMessage::Wave(12),
                 InnerUdpMessage::Wave(9284),
