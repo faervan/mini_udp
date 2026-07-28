@@ -3,25 +3,13 @@ use crate::prelude::*;
 /// The maximum allowed length of the data part of a UDP packet.
 /// The total maximum length is computed by adding the header length as well.
 pub(super) const MAX_PACKET_DATA_LEN: usize = 1024;
-/// 4 bytes for the CRC, then the [`PacketAck`], then 1 byte extra metadata (reliable, ordered)
-/// Currently 2 byte extra because booleans do not get combined yet!
-pub(super) const PACKET_HEADER_LEN: usize = 4 + PacketAck::BYTE_LEN + 2; //1;
+/// 4 bytes for the CRC, then the [`PacketAck`], then 1 byte extra metadata (reliable, ordered),
+///   finally 4 bytes for the amount of messages in the packet (this is not necessary as it can be
+///   infered from the UDP packet length, but the [`ByteRepr`] derive currently always includes it).
+/// Currently 2 byte extra because booleans do not get combined yet! (TODO!)
+pub(super) const PACKET_HEADER_LEN: usize = 4 + PacketAck::BYTE_LEN + 2 + 4;
 /// The maximum allowed length of a UDP packet.
 pub(super) const MAX_PACKET_LEN: usize = PACKET_HEADER_LEN + MAX_PACKET_DATA_LEN;
-
-const PROTOCOL_VERSION: u32 = 0x00_00_00_01;
-/// [`crc::CRC_32_BZIP2`] with `init` set to [`PROTOCOL_VERSION`]
-const CRC_ALGORITHM: crc::Algorithm<u32> = crc::Algorithm {
-    width: 32,
-    poly: 0x04c11db7,
-    init: PROTOCOL_VERSION,
-    refin: false,
-    refout: false,
-    xorout: 0xffffffff,
-    check: 0xfc891918,
-    residue: 0xc704dd7b,
-};
-const CRC: crc::Crc<u32> = crc::Crc::<u32>::new(&CRC_ALGORITHM);
 
 #[derive(ByteRepr, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -81,7 +69,7 @@ mod test {
                 InnerUdpMessage::Hello,
             ],
         );
-        assert_eq!(crate::PacketAck::MIN_BYTE_LEN, 8);
+        assert_eq!(PacketAck::MIN_BYTE_LEN, 8);
         assert_eq!(Packet::<InnerUdpMessage>::MIN_BYTE_LEN, 14);
         assert_eq!(Packet::<InnerUdpMessage>::MAX_BYTE_LEN, 3014);
         let mut buf = [0; Packet::<InnerUdpMessage>::MAX_BYTE_LEN];

@@ -9,14 +9,12 @@ pub mod prelude;
 mod ring_buffer;
 mod sender;
 
-use crate::prelude::*;
-
 #[doc(hidden)]
 pub use tracing;
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use crate::prelude::*;
 
     #[test]
     fn min_max_length_derive() {

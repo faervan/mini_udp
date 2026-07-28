@@ -41,22 +41,29 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
 
 #[cfg(test)]
 mod test {
-    use crate::{packet::InnerUdpMessage, sender::InnerUdpCommunicator};
+    use crate::{packet::InnerUdpMessage, prelude::*};
 
     #[test]
     fn acknowledge() {
-        let mut com = InnerUdpCommunicator::<InnerUdpMessage>::default();
-        // Those two are overridden immediately
-        com.received_packets.push(());
-        com.received_packets.insert(3, ());
-        //
-        com.received_packets.insert(u16::MAX - 30, ());
-        com.received_packets.insert(u16::MAX, ());
-        com.received_packets.push(());
-        let ack = com.create_ack(0);
-        assert_eq!(com.received_packets.iter().count(), 3);
-        com.acknowledge(ack);
-        // TODO! Fix this test
-        // assert_eq!(com.received_packets.iter().count(), 0);
+        let (mut com1, mut com2) = crate::sender::test_init(7300);
+        com1.write(InnerUdpMessage::Hello);
+        assert_eq!(com1.inner.reliable_send_packets.iter().count(), 0);
+        com1.tick().unwrap();
+        com1.write(InnerUdpMessage::Hello);
+        com1.tick().unwrap();
+        com1.write(InnerUdpMessage::Wave(1083));
+        com1.tick().unwrap();
+        com1.write(InnerUdpMessage::Hello);
+        com1.tick().unwrap();
+        com1.write(InnerUdpMessage::Wave(56000));
+        com1.tick().unwrap();
+        assert_eq!(com1.inner.reliable_send_packets.iter().count(), 5);
+        assert_eq!(com2.inner.received_packets.iter().count(), 0);
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        com1.tick().unwrap();
+        com2.tick().unwrap();
+        assert_eq!(com2.inner.received_packets.iter().count(), 5);
+        com1.tick().unwrap();
+        assert_eq!(com1.inner.reliable_send_packets.iter().count(), 0);
     }
 }

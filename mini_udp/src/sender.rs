@@ -12,6 +12,20 @@ use crate::{
     ring_buffer::RingBuffer,
 };
 
+const PROTOCOL_VERSION: u32 = 0x00_00_00_01;
+/// [`crc::CRC_32_BZIP2`] with `init` set to [`PROTOCOL_VERSION`]
+const CRC_ALGORITHM: crc::Algorithm<u32> = crc::Algorithm {
+    width: 32,
+    poly: 0x04c11db7,
+    init: PROTOCOL_VERSION,
+    refin: false,
+    refout: false,
+    xorout: 0xffffffff,
+    check: 0xfc891918,
+    residue: 0xc704dd7b,
+};
+const CRC: crc::Crc<u32> = crc::Crc::<u32>::new(&CRC_ALGORITHM);
+
 pub trait CommunicatorSocket {
     fn bind<A: ToSocketAddrs>(addr: A) -> Self;
     fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<(), std::io::Error>;
@@ -64,6 +78,8 @@ pub(crate) struct InnerUdpCommunicator<M: ByteRepr> {
     /// If this is `true`, a packet has been received more than once, potentially meaning that we
     /// have to send an ack to the other side.
     received_packet_duplicate: bool,
+    #[cfg(test)]
+    received_packet_ids: std::collections::HashSet<u16>,
 }
 
 impl<M: ByteRepr> Default for InnerUdpCommunicator<M> {
@@ -76,6 +92,8 @@ impl<M: ByteRepr> Default for InnerUdpCommunicator<M> {
             msg_send_queue: VecDeque::new(),
             msg_recv_queue: VecDeque::new(),
             received_packet_duplicate: false,
+            #[cfg(test)]
+            received_packet_ids: std::collections::HashSet::new(),
         }
     }
 }
@@ -169,13 +187,15 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
     {
         self.receive(socket);
         if self.received_packet_duplicate && self.msg_send_queue.is_empty() {
+            #[cfg(test)]
+            debug!("Sending heartbeat");
             self.received_packet_duplicate = false;
             let sequence_id = self.unreliable_send_packet_id;
             self.unreliable_send_packet_id = self.unreliable_send_packet_id.wrapping_add(1);
             let packet = Packet::heartbeat(self.create_ack(sequence_id));
             #[cfg(test)]
             if socket.debug_logs {
-                debug!("Constructed new hearbeat packet #{sequence_id}");
+                debug!("Constructed new hearbeat packet with id(unreliable): #{sequence_id}");
             }
             self.unreliable_send_packets.push_back(packet);
         }
@@ -193,21 +213,37 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
     {
         while let Ok(n) = socket.socket.recv(&mut socket.data_buffer) {
             #[cfg(test)]
+            let packet = Packet::<M>::from_bytes(&socket.data_buffer[4..n])
+                .unwrap()
+                .ack
+                .sequence_id;
+            #[cfg(test)]
             // Fake UDP unreliability
             if socket.fake_unreliable && rand::random_bool(0.2) {
                 let corrupt_num = rand::random_range(0..n * 8);
-                debug!("Corrupting {corrupt_num} bits");
+                debug!("Corrupting {corrupt_num} bits of packet #{packet}",);
                 for i in 0..corrupt_num {
                     socket.data_buffer[i / 8] ^= 1 << i % 8;
                 }
             }
-            match Packet::<M>::from_bytes(&socket.data_buffer[..n]) {
+            let Ok(crc_bytes) = socket.data_buffer[..4].try_into() else {
+                continue;
+            };
+            let crc = u32::from_le_bytes(crc_bytes);
+            if CRC.checksum(&socket.data_buffer[4..n]) != crc {
+                #[cfg(test)]
+                warn!("CRC check failed, packet: {packet:#?}");
+                continue;
+            }
+            match Packet::<M>::from_bytes(&socket.data_buffer[4..n]) {
                 Ok(packet) => {
                     #[cfg(test)]
                     // Fake UDP unreliability
                     if socket.fake_unreliable && rand::random_bool(0.5) {
                         continue;
                     }
+                    #[cfg(test)]
+                    debug!("Receiving packet #{}", packet.ack.sequence_id);
                     if !packet.reliable {
                         if packet.messages.is_empty() {
                             // Heartbeat
@@ -236,6 +272,8 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
                         debug!("Received too old packet #{}", packet.ack.sequence_id);
                         continue;
                     }
+                    #[cfg(test)]
+                    assert!(self.received_packet_ids.insert(packet.ack.sequence_id));
                     self.received_packets.insert(packet.ack.sequence_id, ());
                     self.msg_recv_queue.extend(packet.messages);
                     self.acknowledge(packet.ack);
@@ -300,23 +338,33 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
             };
             if last_send.elapsed() > send_cooldown {
                 *last_send = Instant::now();
-                if let Err(e) = packet.write_to_bytes(&mut socket.data_buffer) {
+                if let Err(e) = packet.write_to_bytes(&mut socket.data_buffer[4..]) {
                     panic!(
-                        "{e}: {:#?}\npacket len: {}\npacket max len: {}\ndatabuffer len: {}",
+                        "{e}: {:?}\npacket len: {}\npacket max len: {}\ndatabuffer len: {}",
                         *packet,
                         packet.byte_len(),
                         Packet::<M>::MAX_BYTE_LEN,
                         socket.data_buffer.len()
                     );
                 }
-                if let Err(e) = socket.socket.send(&socket.data_buffer[..packet.byte_len()]) {
+                let crc = CRC.checksum(&socket.data_buffer[4..4 + packet.byte_len()]);
+                socket.data_buffer[..4].copy_from_slice(&crc.to_le_bytes());
+                if let Err(e) = socket
+                    .socket
+                    .send(&socket.data_buffer[..4 + packet.byte_len()])
+                {
                     error!("Failed to send packet: {e}");
                 }
             }
         }
         for packet in self.unreliable_send_packets.drain(..) {
-            packet.write_to_bytes(&mut socket.data_buffer)?;
-            if let Err(e) = socket.socket.send(&socket.data_buffer[..packet.byte_len()]) {
+            packet.write_to_bytes(&mut socket.data_buffer[4..])?;
+            let crc = CRC.checksum(&socket.data_buffer[4..4 + packet.byte_len()]);
+            socket.data_buffer[..4].copy_from_slice(&crc.to_le_bytes());
+            if let Err(e) = socket
+                .socket
+                .send(&socket.data_buffer[..4 + packet.byte_len()])
+            {
                 error!("Failed to send packet: {e}");
             }
         }
@@ -346,7 +394,7 @@ impl UdpCommunicatorSocket {
 }
 
 #[cfg(test)]
-fn test_init<M>(port_offset: u16) -> (UdpCommunicator<M>, UdpCommunicator<M>)
+pub(crate) fn test_init<M>(port_offset: u16) -> (UdpCommunicator<M>, UdpCommunicator<M>)
 where
     M: ByteRepr,
 {
