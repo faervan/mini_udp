@@ -106,9 +106,26 @@ impl<T, const NUM_ITEMS: usize> RingBuffer<T, NUM_ITEMS> {
         }
     }
 
-    /// Iterate over all existing items in chronological order (oldest first).
+    /// Iterate over all existing items in chronological order (oldest first) mutably.
     pub fn iter_mut(&mut self) -> IterMut<'_, T, NUM_ITEMS> {
         IterMut {
+            i: self.newest.wrapping_sub(NUM_ITEMS as u16 - 1),
+            ring: self,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Iterate over all existing values in chronological order (oldest first).
+    pub fn values(&self) -> IterValues<'_, T, NUM_ITEMS> {
+        IterValues {
+            i: self.newest.wrapping_sub(NUM_ITEMS as u16 - 1),
+            ring: self,
+        }
+    }
+
+    /// Iterate over all existing values in chronological order (oldest first) mutably.
+    pub fn values_mut(&mut self) -> IterValuesMut<'_, T, NUM_ITEMS> {
+        IterValuesMut {
             i: self.newest.wrapping_sub(NUM_ITEMS as u16 - 1),
             ring: self,
             _marker: PhantomData,
@@ -157,12 +174,12 @@ pub struct Iter<'a, T, const NUM_ITEMS: usize> {
 }
 
 impl<'a, T, const NUM_ITEMS: usize> Iterator for Iter<'a, T, NUM_ITEMS> {
-    type Item = &'a T;
+    type Item = (u16, &'a T);
     fn next(&mut self) -> Option<Self::Item> {
         for i in wrapping_range(self.i, self.ring.newest.wrapping_add(1)) {
             self.i = self.i.wrapping_add(1);
             if let Some(item) = self.ring.get(i) {
-                return Some(item);
+                return Some((i, item));
             }
         }
         None
@@ -176,6 +193,47 @@ pub struct IterMut<'a, T, const NUM_ITEMS: usize> {
 }
 
 impl<'a, T, const NUM_ITEMS: usize> Iterator for IterMut<'a, T, NUM_ITEMS> {
+    type Item = (u16, &'a mut T);
+    fn next(&mut self) -> Option<Self::Item> {
+        unsafe {
+            let ring = &mut *self.ring;
+            for i in wrapping_range(self.i, ring.newest.wrapping_add(1)) {
+                self.i = self.i.wrapping_add(1);
+                if let Some(item) = ring.get_mut(i) {
+                    let item_ptr = item as *mut T;
+                    return Some((i, &mut *item_ptr));
+                }
+            }
+        }
+        None
+    }
+}
+
+pub struct IterValues<'a, T, const NUM_ITEMS: usize> {
+    i: u16,
+    ring: &'a RingBuffer<T, NUM_ITEMS>,
+}
+
+impl<'a, T, const NUM_ITEMS: usize> Iterator for IterValues<'a, T, NUM_ITEMS> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        for i in wrapping_range(self.i, self.ring.newest.wrapping_add(1)) {
+            self.i = self.i.wrapping_add(1);
+            if let Some(item) = self.ring.get(i) {
+                return Some(item);
+            }
+        }
+        None
+    }
+}
+
+pub struct IterValuesMut<'a, T, const NUM_ITEMS: usize> {
+    i: u16,
+    ring: *mut RingBuffer<T, NUM_ITEMS>,
+    _marker: PhantomData<&'a mut RingBuffer<T, NUM_ITEMS>>,
+}
+
+impl<'a, T, const NUM_ITEMS: usize> Iterator for IterValuesMut<'a, T, NUM_ITEMS> {
     type Item = &'a mut T;
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
@@ -379,7 +437,7 @@ mod test {
         let mut ring = super::RingBuffer::<u16>::new();
         ring.push(0);
         ring.push(1);
-        let mut iter = ring.iter();
+        let mut iter = ring.values();
         assert_eq!(iter.next(), Some(&0));
         assert_eq!(iter.next(), Some(&1));
         assert_eq!(iter.next(), None);
@@ -396,7 +454,7 @@ mod test {
         // The oldest element (0) was replaced by the last element (32), so the first element now is
         // 1.
         let mut i = 1;
-        for item in ring.iter() {
+        for item in ring.values() {
             assert_eq!(*item, i);
             i += 1;
         }

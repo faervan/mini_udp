@@ -56,22 +56,22 @@ mod test {
     use crate::{
         packet::{InnerUdpMessage, Packet},
         prelude::*,
+        ring_buffer::RingBuffer,
     };
 
     #[test]
     fn packet_byte_repr() {
-        let com = UdpCommunicator::<InnerUdpMessage, InnerUdpMessage>::default();
         let packet = Packet::new(
-            com.inner.create_ack(0),
+            PacketAck::new::<bool>(0, &RingBuffer::new(), &RingBuffer::new()),
             [
                 InnerUdpMessage::Wave(12),
                 InnerUdpMessage::Wave(9284),
                 InnerUdpMessage::Hello,
             ],
         );
-        assert_eq!(PacketAck::MIN_BYTE_LEN, 8);
-        assert_eq!(Packet::<InnerUdpMessage>::MIN_BYTE_LEN, 14);
-        assert_eq!(Packet::<InnerUdpMessage>::MAX_BYTE_LEN, 3014);
+        assert_eq!(PacketAck::MIN_BYTE_LEN, 14);
+        assert_eq!(Packet::<InnerUdpMessage>::MIN_BYTE_LEN, 20);
+        assert_eq!(Packet::<InnerUdpMessage>::MAX_BYTE_LEN, 3020);
         let mut buf = [0; Packet::<InnerUdpMessage>::MAX_BYTE_LEN];
         assert!(packet.write_to_bytes(&mut buf).is_ok());
         assert_eq!(

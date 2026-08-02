@@ -8,7 +8,7 @@ use std::{
 use crate::{
     packet::{MAX_PACKET_DATA_LEN, MAX_PACKET_LEN, Packet},
     prelude::*,
-    ring_buffer::RingBuffer,
+    ring_buffer::{RingBuffer, wrapping_gt},
 };
 
 const PROTOCOL_VERSION: u32 = 0x00_00_00_01;
@@ -45,7 +45,10 @@ pub trait SocketSendAddr {
 
 pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
     fn write(&mut self, message: SEND);
+    fn write_reliable(&mut self, message: SEND);
+    fn write_ordered(&mut self, message: SEND);
     fn read(&mut self) -> Option<RECV>;
+    fn read_ordered(&mut self) -> Option<RECV>;
     /// TODO! Remove where Debug
     fn tick(&mut self) -> Result<(), ByteReprError>
     where
@@ -103,30 +106,47 @@ pub struct UdpCommunicatorSocket {
 
 pub(crate) struct InnerUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     pub(crate) reliable_send_packets: RingBuffer<(Instant, Packet<SEND>)>,
+    pub(crate) reliable_ordered_send_packets: RingBuffer<(Instant, Packet<SEND>)>,
+    pub(crate) reliable_received_packets: RingBuffer<()>,
+    pub(crate) reliable_ordered_received_packets: RingBuffer<Packet<RECV>>,
+    /// The sequence id of the next ordered packet to be read
+    ordered_read_packet_head: u16,
     unreliable_send_packet_id: u16,
     unreliable_send_packets: VecDeque<Packet<SEND>>,
-    pub(crate) received_packets: RingBuffer<()>,
-    msg_send_queue: VecDeque<SEND>,
-    msg_recv_queue: VecDeque<RECV>,
+    reliable_send_queue: VecDeque<SEND>,
+    reliable_ordered_send_queue: VecDeque<SEND>,
+    unreliable_send_queue: VecDeque<SEND>,
+    unordered_recv_queue: VecDeque<RECV>,
+    ordered_recv_queue: VecDeque<RECV>,
     /// If this is `true`, a packet has been received more than once, potentially meaning that we
     /// have to send an ack to the other side.
     received_packet_duplicate: bool,
     #[cfg(test)]
-    received_packet_ids: std::collections::HashSet<u16>,
+    received_reliable_packet_ids: std::collections::HashSet<u16>,
+    #[cfg(test)]
+    received_ordered_packet_ids: std::collections::HashSet<u16>,
 }
 
 impl<SEND: ByteRepr, RECV: ByteRepr> Default for InnerUdpCommunicator<SEND, RECV> {
     fn default() -> Self {
         Self {
             reliable_send_packets: RingBuffer::new(),
+            reliable_ordered_send_packets: RingBuffer::new(),
+            reliable_received_packets: RingBuffer::new(),
+            reliable_ordered_received_packets: RingBuffer::new(),
+            ordered_read_packet_head: 0,
             unreliable_send_packet_id: 0,
             unreliable_send_packets: VecDeque::new(),
-            received_packets: RingBuffer::new(),
-            msg_send_queue: VecDeque::new(),
-            msg_recv_queue: VecDeque::new(),
+            reliable_send_queue: VecDeque::new(),
+            reliable_ordered_send_queue: VecDeque::new(),
+            unreliable_send_queue: VecDeque::new(),
+            unordered_recv_queue: VecDeque::new(),
+            ordered_recv_queue: VecDeque::new(),
             received_packet_duplicate: false,
             #[cfg(test)]
-            received_packet_ids: std::collections::HashSet::new(),
+            received_reliable_packet_ids: std::collections::HashSet::new(),
+            #[cfg(test)]
+            received_ordered_packet_ids: std::collections::HashSet::new(),
         }
     }
 }
@@ -236,12 +256,27 @@ impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for MultiUdpCommunicator
 impl<SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV> for UdpCommunicator<SEND, RECV> {
     #[inline(always)]
     fn write(&mut self, message: SEND) {
-        self.inner.msg_send_queue.push_back(message);
+        self.inner.unreliable_send_queue.push_back(message);
+    }
+
+    #[inline(always)]
+    fn write_reliable(&mut self, message: SEND) {
+        self.inner.reliable_send_queue.push_back(message);
+    }
+
+    #[inline(always)]
+    fn write_ordered(&mut self, message: SEND) {
+        self.inner.reliable_ordered_send_queue.push_back(message);
     }
 
     #[inline(always)]
     fn read(&mut self) -> Option<RECV> {
-        self.inner.msg_recv_queue.pop_front()
+        self.inner.unordered_recv_queue.pop_front()
+    }
+
+    #[inline(always)]
+    fn read_ordered(&mut self) -> Option<RECV> {
+        self.inner.ordered_recv_queue.pop_front()
     }
 
     #[inline(always)]
@@ -265,12 +300,27 @@ impl<'a, SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV>
 {
     #[inline(always)]
     fn write(&mut self, message: SEND) {
-        self.inner.msg_send_queue.push_back(message);
+        self.inner.unreliable_send_queue.push_back(message);
+    }
+
+    #[inline(always)]
+    fn write_reliable(&mut self, message: SEND) {
+        self.inner.reliable_send_queue.push_back(message);
+    }
+
+    #[inline(always)]
+    fn write_ordered(&mut self, message: SEND) {
+        self.inner.reliable_ordered_send_queue.push_back(message);
     }
 
     #[inline(always)]
     fn read(&mut self) -> Option<RECV> {
-        self.inner.msg_recv_queue.pop_front()
+        self.inner.unordered_recv_queue.pop_front()
+    }
+
+    #[inline(always)]
+    fn read_ordered(&mut self) -> Option<RECV> {
+        self.inner.ordered_recv_queue.pop_front()
     }
 
     #[inline(always)]
@@ -318,7 +368,7 @@ impl<SEND: ByteRepr + Debug, RECV: ByteRepr + Debug> MultiCommunicator<SEND, REC
         SEND: Clone,
     {
         for com in self.coms.values_mut() {
-            com.msg_send_queue.push_back(message.clone());
+            com.reliable_send_queue.push_back(message.clone());
         }
     }
 
@@ -327,7 +377,7 @@ impl<SEND: ByteRepr + Debug, RECV: ByteRepr + Debug> MultiCommunicator<SEND, REC
         SEND: Clone,
     {
         for (_, com) in self.coms.iter_mut().filter(|(addr, _)| **addr != exception) {
-            com.msg_send_queue.push_back(message.clone());
+            com.reliable_send_queue.push_back(message.clone());
         }
     }
 
@@ -418,21 +468,29 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         RECV: Debug,
         Addr: SocketSendAddr,
     {
-        if self.received_packet_duplicate && self.msg_send_queue.is_empty() {
+        if self.received_packet_duplicate
+            && self.reliable_send_queue.is_empty()
+            && self.reliable_ordered_send_queue.is_empty()
+            && self.unreliable_send_queue.is_empty()
+        {
             #[cfg(debug_assertions)]
             if socket.debug_logs {
                 debug!("Sending heartbeat");
             }
-            self.received_packet_duplicate = false;
             let sequence_id = self.unreliable_send_packet_id;
             self.unreliable_send_packet_id = self.unreliable_send_packet_id.wrapping_add(1);
-            let packet = Packet::heartbeat(self.create_ack(sequence_id));
+            let packet = Packet::heartbeat(PacketAck::new(
+                sequence_id,
+                &self.reliable_received_packets,
+                &self.reliable_ordered_received_packets,
+            ));
             #[cfg(debug_assertions)]
             if socket.debug_logs {
                 debug!("Constructed new hearbeat packet with id(unreliable): #{sequence_id}");
             }
             self.unreliable_send_packets.push_back(packet);
         }
+        self.received_packet_duplicate = false;
         self.flush_messages(
             #[cfg(debug_assertions)]
             socket,
@@ -468,7 +526,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
             let corrupt_num = rand::random_range(0..n * 8);
             debug!("Corrupting {corrupt_num} bits of packet #{packet}",);
             for i in 0..corrupt_num {
-                socket.data_buffer[i / 8] ^= 1 << i % 8;
+                socket.data_buffer[i / 8] ^= 1 << (i % 8);
             }
         }
         let Ok(crc_bytes) = socket.data_buffer[..4].try_into() else {
@@ -495,33 +553,80 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
                         #[cfg(test)]
                         debug!("Received heartbeat packet #{}", packet.ack.sequence_id);
                     } else {
-                        self.msg_recv_queue.extend(packet.messages);
+                        self.unordered_recv_queue.extend(packet.messages);
                     }
-                    self.acknowledge(packet.ack);
+                    self.acknowledge(&packet.ack);
                     return;
                 }
 
-                if self.received_packets.get(packet.ack.sequence_id).is_some() {
+                if (packet.ordered
+                    && self
+                        .reliable_ordered_received_packets
+                        .get(packet.ack.sequence_id)
+                        .is_some())
+                    || (!packet.ordered
+                        && self
+                            .reliable_received_packets
+                            .get(packet.ack.sequence_id)
+                            .is_some())
+                {
                     self.received_packet_duplicate = true;
                     #[cfg(test)]
-                    debug!("Received duplicate packet #{}", packet.ack.sequence_id);
+                    debug!(
+                        "Received duplicate packet #{} (ordered = {})",
+                        packet.ack.sequence_id, packet.ordered
+                    );
                     return;
                 }
+                let newest_index = if packet.ordered {
+                    self.reliable_ordered_received_packets.get_newest_index()
+                } else {
+                    self.reliable_received_packets.get_newest_index()
+                };
                 if super::ring_buffer::wrapping_gt(
-                    self.received_packets.get_newest_index().wrapping_sub(31),
+                    newest_index.wrapping_sub(31),
                     packet.ack.sequence_id,
                     64,
                 ) {
                     self.received_packet_duplicate = true;
                     #[cfg(test)]
-                    debug!("Received too old packet #{}", packet.ack.sequence_id);
+                    debug!(
+                        "Received too old packet #{} (ordered = {})",
+                        packet.ack.sequence_id, packet.ordered
+                    );
                     return;
                 }
+
                 #[cfg(test)]
-                assert!(self.received_packet_ids.insert(packet.ack.sequence_id));
-                self.received_packets.insert(packet.ack.sequence_id, ());
-                self.msg_recv_queue.extend(packet.messages);
-                self.acknowledge(packet.ack);
+                assert!(
+                    if packet.ordered {
+                        &mut self.received_ordered_packet_ids
+                    } else {
+                        &mut self.received_reliable_packet_ids
+                    }
+                    .insert(packet.ack.sequence_id)
+                );
+
+                self.acknowledge(&packet.ack);
+                if packet.ordered {
+                    self.reliable_ordered_received_packets
+                        .insert(packet.ack.sequence_id, packet);
+                    for (id, packet) in self.reliable_ordered_received_packets.iter_mut() {
+                        debug!("packet head: {}, id = {id}", self.ordered_read_packet_head);
+                        if id == self.ordered_read_packet_head {
+                            debug!("extending with {} messages", packet.messages.len());
+                            self.ordered_read_packet_head =
+                                self.ordered_read_packet_head.wrapping_add(1);
+                            self.ordered_recv_queue.extend(packet.messages.drain(..));
+                        } else if wrapping_gt(id, self.ordered_read_packet_head, 32) {
+                            break;
+                        }
+                    }
+                } else {
+                    self.reliable_received_packets
+                        .insert(packet.ack.sequence_id, ());
+                    self.unordered_recv_queue.extend(packet.messages);
+                }
             }
             Err(e) => warn!("Received invalid packet: {e}"),
         }
@@ -533,10 +638,28 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         SEND: Debug,
         RECV: Debug,
     {
-        while !self.reliable_send_packets.push_will_override() && !self.msg_send_queue.is_empty() {
+        flush_messages(
+            #[cfg(debug_assertions)]
+            socket,
+            &mut self.reliable_send_packets,
+            &self.reliable_received_packets,
+            &self.reliable_ordered_received_packets,
+            &mut self.reliable_send_queue,
+            false,
+        );
+        flush_messages(
+            #[cfg(debug_assertions)]
+            socket,
+            &mut self.reliable_ordered_send_packets,
+            &self.reliable_received_packets,
+            &self.reliable_ordered_received_packets,
+            &mut self.reliable_ordered_send_queue,
+            true,
+        );
+        while !self.unreliable_send_queue.is_empty() {
             let mut available_bytes = MAX_PACKET_DATA_LEN;
             let mut included_msgs = 0;
-            for msg in self.msg_send_queue.iter() {
+            for msg in self.unreliable_send_queue.iter() {
                 if msg.byte_len() <= available_bytes {
                     available_bytes -= msg.byte_len();
                     included_msgs += 1;
@@ -549,24 +672,30 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
             if included_msgs == 0 {
                 error!(
                     "Msg {:#?} is too large to fit {} bytes, but the max packet size is {}",
-                    self.msg_send_queue[0],
-                    self.msg_send_queue[0].byte_len(),
+                    self.unreliable_send_queue[0],
+                    self.unreliable_send_queue[0].byte_len(),
                     MAX_PACKET_DATA_LEN
                 );
             }
-            let sequence_id = self.reliable_send_packets.get_next_index();
+            let sequence_id = self.unreliable_send_packet_id;
+            self.unreliable_send_packet_id = self.unreliable_send_packet_id.wrapping_add(1);
             let packet = Packet {
-                ack: self.create_ack(sequence_id),
-                reliable: true,
-                ordered: true,
-                messages: self.msg_send_queue.drain(..included_msgs).collect(),
+                ack: PacketAck::new(
+                    sequence_id,
+                    &self.reliable_received_packets,
+                    &self.reliable_ordered_received_packets,
+                ),
+                reliable: false,
+                ordered: false,
+                messages: self.unreliable_send_queue.drain(..included_msgs).collect(),
             };
             #[cfg(debug_assertions)]
             if socket.debug_logs {
-                debug!("Constructed new packet #{sequence_id} with {included_msgs} messages");
+                debug!(
+                    "Constructed new unreliable packet #{sequence_id} with {included_msgs} messages"
+                );
             }
-            self.reliable_send_packets
-                .push((Instant::now() - Duration::from_secs(1), packet));
+            self.unreliable_send_packets.push_back(packet);
         }
     }
 
@@ -581,7 +710,11 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         RECV: Debug,
         Addr: SocketSendAddr,
     {
-        for (last_send, packet) in self.reliable_send_packets.iter_mut() {
+        for (last_send, packet) in self
+            .reliable_send_packets
+            .values_mut()
+            .chain(self.reliable_ordered_send_packets.values_mut())
+        {
             let send_cooldown = if cfg!(test) {
                 Duration::from_millis(3)
             } else {
@@ -619,8 +752,59 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
 
     pub fn has_work(&self) -> bool {
         !(self.reliable_send_packets.is_empty()
+            && self.reliable_ordered_send_packets.is_empty()
             && self.unreliable_send_packets.is_empty()
-            && self.msg_send_queue.is_empty())
+            && self.reliable_send_queue.is_empty()
+            && self.reliable_ordered_send_queue.is_empty()
+            && self.unreliable_send_queue.is_empty())
+    }
+}
+
+fn flush_messages<SEND: ByteRepr + Debug, RECV: ByteRepr>(
+    #[cfg(debug_assertions)] socket: &UdpCommunicatorSocket,
+    send_packets: &mut RingBuffer<(Instant, Packet<SEND>)>,
+    reliable_received: &RingBuffer<()>,
+    ordered_received: &RingBuffer<Packet<RECV>>,
+    send_queue: &mut VecDeque<SEND>,
+    ordered: bool,
+) {
+    while !send_packets.push_will_override() && !send_queue.is_empty() {
+        let mut available_bytes = MAX_PACKET_DATA_LEN;
+        let mut included_msgs = 0;
+        for msg in send_queue.iter() {
+            if msg.byte_len() <= available_bytes {
+                available_bytes -= msg.byte_len();
+                included_msgs += 1;
+            } else {
+                // TODO! Maybe include other messages here that are small enough, but that
+                // would make message ordering arbitrary
+                break;
+            }
+        }
+        if included_msgs == 0 {
+            error!(
+                "Msg {:#?} is too large to fit {} bytes, but the max packet size is {}",
+                send_queue[0],
+                send_queue[0].byte_len(),
+                MAX_PACKET_DATA_LEN
+            );
+        }
+        let sequence_id = send_packets.get_next_index();
+        let packet = Packet {
+            // TODO! creating a new ack for every iteration is pointless, wasted work
+            ack: PacketAck::new(sequence_id, reliable_received, ordered_received),
+            reliable: true,
+            ordered,
+            messages: send_queue.drain(..included_msgs).collect(),
+        };
+        #[cfg(debug_assertions)]
+        if socket.debug_logs {
+            debug!(
+                "Constructed new reliable {} packet #{sequence_id} with {included_msgs} messages",
+                if ordered { "ordered" } else { "unordered" }
+            );
+        }
+        send_packets.push((Instant::now() - Duration::from_secs(1), packet));
     }
 }
 
@@ -715,7 +899,7 @@ mod test {
     fn send_until_ack() {
         let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7202);
         let m1 = InnerUdpMessage::Hello;
-        com2.write(m1);
+        com2.write_reliable(m1);
         com2.tick().unwrap();
 
         let mut i = 0;
@@ -745,7 +929,7 @@ mod test {
             assert!(send.insert(InnerUdpMessage::Wave(i)));
         }
         for m in &send {
-            com1.write(*m);
+            com1.write_reliable(*m);
         }
         com1.tick().unwrap();
 
@@ -754,6 +938,36 @@ mod test {
             com2.tick().unwrap();
             while let Some(message) = com2.read() {
                 assert!(received.insert(message));
+            }
+            com1.tick().unwrap();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        assert_eq!(received, send);
+    }
+
+    #[test]
+    fn test_ordered_reliability() {
+        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7206);
+        com1.socket = com1.socket.with_fake_unreliablity().with_debug_logs();
+        com2.socket = com2.socket.with_fake_unreliablity();
+        let mut send = vec![];
+        for i in 0..20000 {
+            send.push(InnerUdpMessage::Wave(i));
+        }
+        for m in &send {
+            com1.write_ordered(*m);
+        }
+        com1.tick().unwrap();
+
+        let mut received = vec![];
+        let mut i = 0;
+        while com1.has_work() {
+            com2.tick().unwrap();
+            while let Some(message) = com2.read_ordered() {
+                received.push(message);
+                assert_eq!(message, InnerUdpMessage::Wave(i));
+                i += 1;
             }
             com1.tick().unwrap();
             std::thread::sleep(Duration::from_millis(1));
