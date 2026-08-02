@@ -60,7 +60,7 @@ mod test {
 
     #[test]
     fn packet_byte_repr() {
-        let com = UdpCommunicator::<InnerUdpMessage>::default();
+        let com = UdpCommunicator::<InnerUdpMessage, InnerUdpMessage>::default();
         let packet = Packet::new(
             com.inner.create_ack(0),
             [

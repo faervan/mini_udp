@@ -15,7 +15,7 @@ impl StaticByteRepr for PacketAck {
     const BYTE_LEN: usize = PacketAck::MIN_BYTE_LEN;
 }
 
-impl<M: ByteRepr> InnerUdpCommunicator<M> {
+impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
     pub(super) fn acknowledge(&mut self, ack: PacketAck) {
         for i in 0..32 {
             if ack.ack_bits & 1 << i != 0 {
@@ -45,7 +45,7 @@ mod test {
 
     #[test]
     fn acknowledge() {
-        let (mut com1, mut com2) = crate::sender::test_init(7300);
+        let (mut com1, mut com2) = crate::sender::test_init::<_, bool>(7300);
         com1.write(InnerUdpMessage::Hello);
         assert_eq!(com1.inner.reliable_send_packets.iter().count(), 0);
         com1.tick().unwrap();

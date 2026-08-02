@@ -43,38 +43,53 @@ pub trait SocketSendAddr {
     ) -> Result<usize, std::io::Error>;
 }
 
-pub trait Communicator<M: ByteRepr> {
-    fn write(&mut self, message: M);
-    fn read(&mut self) -> Option<M>;
+pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
+    fn write(&mut self, message: SEND);
+    fn read(&mut self) -> Option<RECV>;
     /// TODO! Remove where Debug
     fn tick(&mut self) -> Result<(), ByteReprError>
     where
-        M: Debug;
+        SEND: Debug,
+        RECV: Debug;
     /// Returns `true` if there are any pending messages to be send / packets to get acknowledged.
     fn has_work(&self) -> bool;
 }
 
-pub trait MultiCommunicator<M: ByteRepr> {
+pub trait MultiCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     fn recv<CB>(&mut self, on_recv: CB)
     where
-        CB: FnMut(SocketAddr, UdpCommunicatorMut<M>);
-    fn get_mut<'a>(&'a mut self, client: &'a SocketAddr) -> Option<UdpCommunicatorMut<'a, M>>;
+        CB: FnMut(SocketAddr, UdpCommunicatorMut<SEND, RECV>);
+    fn broadcast(&mut self, message: SEND)
+    where
+        SEND: Clone;
+    fn breadcast_except(&mut self, message: SEND, exception: SocketAddr)
+    where
+        SEND: Clone;
+    fn tick<CB>(&mut self, on_recv: CB)
+    where
+        CB: FnMut(SocketAddr, UdpCommunicatorMut<SEND, RECV>, DelayedBroadcast<SEND>),
+        SEND: Debug + Clone,
+        RECV: Debug;
+    fn get_mut<'a>(
+        &'a mut self,
+        client: &'a SocketAddr,
+    ) -> Option<UdpCommunicatorMut<'a, SEND, RECV>>;
 }
 
-pub struct MultiUdpCommunicator<M: ByteRepr> {
+pub struct MultiUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     socket: UdpCommunicatorSocket,
-    coms: HashMap<SocketAddr, InnerUdpCommunicator<M>>,
+    coms: HashMap<SocketAddr, InnerUdpCommunicator<SEND, RECV>>,
 }
 
-pub struct UdpCommunicator<M: ByteRepr> {
+pub struct UdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     socket: UdpCommunicatorSocket,
-    pub(super) inner: InnerUdpCommunicator<M>,
+    pub(super) inner: InnerUdpCommunicator<SEND, RECV>,
 }
 
-pub struct UdpCommunicatorMut<'a, M: ByteRepr> {
+pub struct UdpCommunicatorMut<'a, SEND: ByteRepr, RECV: ByteRepr> {
     socket: &'a mut UdpCommunicatorSocket,
     addr: &'a SocketAddr,
-    inner: &'a mut InnerUdpCommunicator<M>,
+    inner: &'a mut InnerUdpCommunicator<SEND, RECV>,
 }
 
 pub struct UdpCommunicatorSocket {
@@ -86,13 +101,13 @@ pub struct UdpCommunicatorSocket {
     debug_logs: bool,
 }
 
-pub(crate) struct InnerUdpCommunicator<M: ByteRepr> {
-    pub(crate) reliable_send_packets: RingBuffer<(Instant, Packet<M>)>,
+pub(crate) struct InnerUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
+    pub(crate) reliable_send_packets: RingBuffer<(Instant, Packet<SEND>)>,
     unreliable_send_packet_id: u16,
-    unreliable_send_packets: VecDeque<Packet<M>>,
+    unreliable_send_packets: VecDeque<Packet<SEND>>,
     pub(crate) received_packets: RingBuffer<()>,
-    msg_send_queue: VecDeque<M>,
-    msg_recv_queue: VecDeque<M>,
+    msg_send_queue: VecDeque<SEND>,
+    msg_recv_queue: VecDeque<RECV>,
     /// If this is `true`, a packet has been received more than once, potentially meaning that we
     /// have to send an ack to the other side.
     received_packet_duplicate: bool,
@@ -100,7 +115,7 @@ pub(crate) struct InnerUdpCommunicator<M: ByteRepr> {
     received_packet_ids: std::collections::HashSet<u16>,
 }
 
-impl<M: ByteRepr> Default for InnerUdpCommunicator<M> {
+impl<SEND: ByteRepr, RECV: ByteRepr> Default for InnerUdpCommunicator<SEND, RECV> {
     fn default() -> Self {
         Self {
             reliable_send_packets: RingBuffer::new(),
@@ -116,7 +131,7 @@ impl<M: ByteRepr> Default for InnerUdpCommunicator<M> {
     }
 }
 
-impl<M: ByteRepr> Default for UdpCommunicator<M> {
+impl<SEND: ByteRepr, RECV: ByteRepr> Default for UdpCommunicator<SEND, RECV> {
     fn default() -> Self {
         Self {
             socket: UdpCommunicatorSocket::bind("0.0.0.0:0"),
@@ -176,7 +191,7 @@ impl SocketSendAddr for SocketAddr {
     }
 }
 
-impl<M: ByteRepr> CommunicatorSocket for UdpCommunicator<M> {
+impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for UdpCommunicator<SEND, RECV> {
     fn bind<A: ToSocketAddrs>(addr: A) -> Self {
         Self {
             socket: UdpCommunicatorSocket::bind(addr),
@@ -197,7 +212,7 @@ impl<M: ByteRepr> CommunicatorSocket for UdpCommunicator<M> {
     }
 }
 
-impl<M: ByteRepr> CommunicatorSocket for MultiUdpCommunicator<M> {
+impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for MultiUdpCommunicator<SEND, RECV> {
     fn bind<A: ToSocketAddrs>(addr: A) -> Self {
         Self {
             socket: UdpCommunicatorSocket::bind(addr),
@@ -218,21 +233,22 @@ impl<M: ByteRepr> CommunicatorSocket for MultiUdpCommunicator<M> {
     }
 }
 
-impl<M: ByteRepr> Communicator<M> for UdpCommunicator<M> {
+impl<SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV> for UdpCommunicator<SEND, RECV> {
     #[inline(always)]
-    fn write(&mut self, message: M) {
+    fn write(&mut self, message: SEND) {
         self.inner.msg_send_queue.push_back(message);
     }
 
     #[inline(always)]
-    fn read(&mut self) -> Option<M> {
+    fn read(&mut self) -> Option<RECV> {
         self.inner.msg_recv_queue.pop_front()
     }
 
     #[inline(always)]
     fn tick(&mut self) -> Result<(), ByteReprError>
     where
-        M: Debug,
+        SEND: Debug,
+        RECV: Debug,
     {
         self.inner.receive(&mut self.socket);
         self.inner.send(&(), &mut self.socket)
@@ -244,21 +260,24 @@ impl<M: ByteRepr> Communicator<M> for UdpCommunicator<M> {
     }
 }
 
-impl<'a, M: ByteRepr> Communicator<M> for UdpCommunicatorMut<'a, M> {
+impl<'a, SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV>
+    for UdpCommunicatorMut<'a, SEND, RECV>
+{
     #[inline(always)]
-    fn write(&mut self, message: M) {
+    fn write(&mut self, message: SEND) {
         self.inner.msg_send_queue.push_back(message);
     }
 
     #[inline(always)]
-    fn read(&mut self) -> Option<M> {
+    fn read(&mut self) -> Option<RECV> {
         self.inner.msg_recv_queue.pop_front()
     }
 
     #[inline(always)]
     fn tick(&mut self) -> Result<(), ByteReprError>
     where
-        M: Debug,
+        SEND: Debug,
+        RECV: Debug,
     {
         self.inner.send(self.addr, self.socket)
     }
@@ -270,10 +289,12 @@ impl<'a, M: ByteRepr> Communicator<M> for UdpCommunicatorMut<'a, M> {
 }
 
 /// TODO: Remove where Debug
-impl<M: ByteRepr + Debug> MultiCommunicator<M> for MultiUdpCommunicator<M> {
+impl<SEND: ByteRepr + Debug, RECV: ByteRepr + Debug> MultiCommunicator<SEND, RECV>
+    for MultiUdpCommunicator<SEND, RECV>
+{
     fn recv<CB>(&mut self, mut on_recv: CB)
     where
-        CB: FnMut(SocketAddr, UdpCommunicatorMut<M>),
+        CB: FnMut(SocketAddr, UdpCommunicatorMut<SEND, RECV>),
     {
         while let Ok((n, addr)) = self.socket.socket.recv_from(&mut self.socket.data_buffer) {
             let com = self.coms.entry(addr).or_default();
@@ -292,7 +313,75 @@ impl<M: ByteRepr + Debug> MultiCommunicator<M> for MultiUdpCommunicator<M> {
         }
     }
 
-    fn get_mut<'a>(&'a mut self, client: &'a SocketAddr) -> Option<UdpCommunicatorMut<'a, M>> {
+    fn broadcast(&mut self, message: SEND)
+    where
+        SEND: Clone,
+    {
+        for com in self.coms.values_mut() {
+            com.msg_send_queue.push_back(message.clone());
+        }
+    }
+
+    fn breadcast_except(&mut self, message: SEND, exception: SocketAddr)
+    where
+        SEND: Clone,
+    {
+        for (_, com) in self.coms.iter_mut().filter(|(addr, _)| **addr != exception) {
+            com.msg_send_queue.push_back(message.clone());
+        }
+    }
+
+    fn tick<CB>(&mut self, mut on_recv: CB)
+    where
+        CB: FnMut(SocketAddr, UdpCommunicatorMut<SEND, RECV>, DelayedBroadcast<SEND>),
+        SEND: Debug + Clone,
+        RECV: Debug,
+    {
+        let mut broadcast = vec![];
+        let mut broadcast_except = vec![];
+        while let Ok((n, addr)) = self.socket.socket.recv_from(&mut self.socket.data_buffer) {
+            let com = self.coms.entry(addr).or_default();
+            com.read_packet(n, &mut self.socket);
+            on_recv(
+                addr,
+                UdpCommunicatorMut {
+                    socket: &mut self.socket,
+                    addr: &addr,
+                    inner: com,
+                },
+                DelayedBroadcast {
+                    broadcast: &mut broadcast,
+                    broadcast_except: &mut broadcast_except,
+                },
+            );
+        }
+
+        for message in broadcast {
+            self.broadcast(message);
+        }
+
+        for (exception, message) in broadcast_except {
+            self.breadcast_except(message, exception);
+        }
+
+        for (addr, inner) in &mut self.coms {
+            if let Err(e) = {
+                UdpCommunicatorMut {
+                    socket: &mut self.socket,
+                    addr,
+                    inner,
+                }
+                .tick()
+            } {
+                warn!("Failed to tick Communicator to {addr:?}: {e}");
+            }
+        }
+    }
+
+    fn get_mut<'a>(
+        &'a mut self,
+        client: &'a SocketAddr,
+    ) -> Option<UdpCommunicatorMut<'a, SEND, RECV>> {
         let inner = self.coms.get_mut(client)?;
         Some(UdpCommunicatorMut {
             socket: &mut self.socket,
@@ -302,7 +391,22 @@ impl<M: ByteRepr + Debug> MultiCommunicator<M> for MultiUdpCommunicator<M> {
     }
 }
 
-impl<M: ByteRepr> InnerUdpCommunicator<M> {
+pub struct DelayedBroadcast<'a, SEND: ByteRepr + Clone> {
+    broadcast: &'a mut Vec<SEND>,
+    broadcast_except: &'a mut Vec<(SocketAddr, SEND)>,
+}
+
+impl<'a, SEND: ByteRepr + Clone> DelayedBroadcast<'a, SEND> {
+    pub fn broadcast(&mut self, message: SEND) {
+        self.broadcast.push(message);
+    }
+
+    pub fn broadcast_except(&mut self, message: SEND, exception: SocketAddr) {
+        self.broadcast_except.push((exception, message));
+    }
+}
+
+impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
     /// TODO! Remove where Debug
     fn send<Addr>(
         &mut self,
@@ -310,7 +414,8 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
         socket: &mut UdpCommunicatorSocket,
     ) -> Result<(), ByteReprError>
     where
-        M: Debug,
+        SEND: Debug,
+        RECV: Debug,
         Addr: SocketSendAddr,
     {
         if self.received_packet_duplicate && self.msg_send_queue.is_empty() {
@@ -338,7 +443,8 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
     /// TODO! Remove where Debug
     fn receive(&mut self, socket: &mut UdpCommunicatorSocket)
     where
-        M: Debug,
+        SEND: Debug,
+        RECV: Debug,
     {
         while let Ok(n) = socket.socket.recv(&mut socket.data_buffer) {
             self.read_packet(n, socket);
@@ -348,10 +454,11 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
     /// TODO! Remove where Debug
     fn read_packet(&mut self, n: usize, socket: &mut UdpCommunicatorSocket)
     where
-        M: Debug,
+        SEND: Debug,
+        RECV: Debug,
     {
         #[cfg(debug_assertions)]
-        let packet = Packet::<M>::from_bytes(&socket.data_buffer[4..n])
+        let packet = Packet::<RECV>::from_bytes(&socket.data_buffer[4..n])
             .unwrap()
             .ack
             .sequence_id;
@@ -373,7 +480,7 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
             warn!("CRC check failed, packet: {packet:#?}");
             return;
         }
-        match Packet::<M>::from_bytes(&socket.data_buffer[4..n]) {
+        match Packet::<RECV>::from_bytes(&socket.data_buffer[4..n]) {
             Ok(packet) => {
                 #[cfg(debug_assertions)]
                 // Fake UDP unreliability
@@ -423,7 +530,8 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
     /// TODO! Remove where Debug
     fn flush_messages(&mut self, #[cfg(debug_assertions)] socket: &UdpCommunicatorSocket)
     where
-        M: Debug,
+        SEND: Debug,
+        RECV: Debug,
     {
         while !self.reliable_send_packets.push_will_override() && !self.msg_send_queue.is_empty() {
             let mut available_bytes = MAX_PACKET_DATA_LEN;
@@ -469,7 +577,8 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
         socket: &mut UdpCommunicatorSocket,
     ) -> Result<(), ByteReprError>
     where
-        M: Debug,
+        SEND: Debug,
+        RECV: Debug,
         Addr: SocketSendAddr,
     {
         for (last_send, packet) in self.reliable_send_packets.iter_mut() {
@@ -485,7 +594,7 @@ impl<M: ByteRepr> InnerUdpCommunicator<M> {
                         "{e}: {:?}\npacket len: {}\npacket max len: {}\ndatabuffer len: {}",
                         *packet,
                         packet.byte_len(),
-                        Packet::<M>::MAX_BYTE_LEN,
+                        Packet::<SEND>::MAX_BYTE_LEN,
                         socket.data_buffer.len()
                     );
                 }
@@ -529,7 +638,7 @@ impl UdpCommunicatorSocket {
     }
 }
 
-impl<M: ByteRepr> UdpCommunicator<M> {
+impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
     #[cfg(debug_assertions)]
     pub fn with_fake_unreliablity(mut self) -> Self {
         self.socket = self.socket.with_fake_unreliablity();
@@ -543,7 +652,7 @@ impl<M: ByteRepr> UdpCommunicator<M> {
     }
 }
 
-impl<M: ByteRepr> MultiUdpCommunicator<M> {
+impl<SEND: ByteRepr, RECV: ByteRepr> MultiUdpCommunicator<SEND, RECV> {
     #[cfg(debug_assertions)]
     pub fn with_fake_unreliablity(mut self) -> Self {
         self.socket = self.socket.with_fake_unreliablity();
@@ -558,9 +667,12 @@ impl<M: ByteRepr> MultiUdpCommunicator<M> {
 }
 
 #[cfg(test)]
-pub(crate) fn test_init<M>(port_offset: u16) -> (UdpCommunicator<M>, UdpCommunicator<M>)
+pub(crate) fn test_init<SEND, RECV>(
+    port_offset: u16,
+) -> (UdpCommunicator<SEND, RECV>, UdpCommunicator<SEND, RECV>)
 where
-    M: ByteRepr,
+    SEND: ByteRepr,
+    RECV: ByteRepr,
 {
     let _ = tracing_subscriber::FmtSubscriber::builder()
         .with_test_writer()
@@ -570,8 +682,8 @@ where
     let localhost = std::net::IpAddr::V4(localhost);
     let addr1 = std::net::SocketAddr::new(localhost, port_offset);
     let addr2 = std::net::SocketAddr::new(localhost, port_offset + 1);
-    let mut com1 = UdpCommunicator::<M>::bind(addr1);
-    let mut com2 = UdpCommunicator::<M>::bind(addr2);
+    let mut com1 = UdpCommunicator::<SEND, RECV>::bind(addr1);
+    let mut com2 = UdpCommunicator::<SEND, RECV>::bind(addr2);
     assert!(com2.connect(addr1).is_ok());
     assert!(com1.connect(addr2).is_ok());
     (com1, com2)
@@ -587,7 +699,7 @@ mod test {
 
     #[test]
     fn packet_roundtrip() {
-        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage>(7200);
+        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7200);
         let m1 = InnerUdpMessage::Hello;
         let m2 = InnerUdpMessage::Wave(1394);
         com2.write(m1);
@@ -601,7 +713,7 @@ mod test {
 
     #[test]
     fn send_until_ack() {
-        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage>(7202);
+        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7202);
         let m1 = InnerUdpMessage::Hello;
         com2.write(m1);
         com2.tick().unwrap();
@@ -624,7 +736,7 @@ mod test {
 
     #[test]
     fn test_reliability() {
-        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage>(7204);
+        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7204);
         com1.socket = com1.socket.with_fake_unreliablity().with_debug_logs();
         com2.socket = com2.socket.with_fake_unreliablity();
         let mut send = HashSet::new();
