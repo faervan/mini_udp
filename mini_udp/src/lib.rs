@@ -475,6 +475,37 @@ mod test {
         );
     }
 
+    #[test]
+    fn array() {
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct A {
+            list: [f32; 3],
+        }
+        #[derive(ByteRepr, PartialEq, Debug, Clone, Copy)]
+        struct B(usize);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct C {
+            a: [i8; 9],
+            b: [B; 240],
+        }
+
+        crate::test_bitrepr_roundtrip!(
+            a,
+            A,
+            A {
+                list: [1397.201, -0.0, -4010401.32914]
+            }
+        );
+        crate::test_bitrepr_roundtrip!(
+            c,
+            C,
+            C {
+                a: [-127, 0, 84, -5, 39, 100, -128, 127, -99],
+                b: [B(usize::MAX); 240]
+            }
+        );
+    }
+
     #[macro_export]
     macro_rules! test_bitrepr_roundtrip {
         ($binding:ident, $ty:ident, $init:expr) => {

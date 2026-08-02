@@ -86,6 +86,20 @@ impl Field {
                     byte_ptr += #ident.byte_len();
                 }
             }
+            Value::Array { ty, length } => {
+                quote! {
+                    let mut #ident = (0..#length)
+                        .map(|n| {
+                            let item = <#ty>::from_bytes(&bytes[byte_ptr..])?;
+                            byte_ptr += item.byte_len();
+                            Ok(item)
+                        })
+                        // TODO! This heap allocation is unnecessary
+                        .collect::<Result<Vec<_>, ::mini_udp::ByteReprError>>()?
+                        .try_into()
+                        .unwrap();
+                }
+            }
             Value::Vec { ty, .. } => {
                 quote! {
                     let mut #ident = vec![];
@@ -128,7 +142,7 @@ impl Field {
             true => ident.to_token_stream(),
             false => match self.value {
                 Value::Vec { .. } => quote! {(#ident.len() as u32)},
-                Value::Delegated { .. } => return quote! {},
+                Value::Array { .. } | Value::Delegated { .. } => return quote! {},
                 _ => unreachable!(),
             },
         };
@@ -148,6 +162,14 @@ impl Field {
                 quote! {
                     #ident.write_to_bytes(&mut bytes[byte_ptr..])?;
                     byte_ptr += #ident.byte_len();
+                }
+            }
+            Value::Array { .. } => {
+                quote! {
+                    for item in #ident.iter() {
+                        item.write_to_bytes(&mut bytes[byte_ptr..])?;
+                        byte_ptr += item.byte_len();
+                    }
                 }
             }
             Value::Vec { .. } => {
@@ -223,6 +245,15 @@ pub enum Value {
     #[assoc(name = quote! {i128}, length = ByteLen::fully_static(16))]
     I128,
     #[assoc(
+        name = quote! {[#_ty; #_length]}.to_token_stream(),
+        length = ByteLen::fully_unknown(
+            quote! {<#_ty>::MIN_BYTE_LEN * #_length},
+            quote! {<#_ty>::MAX_BYTE_LEN * #_length},
+            quote! {#field.iter().map(|f| f.byte_len()).sum::<usize>()},
+        )
+    )]
+    Array { ty: Box<Self>, length: syn::Expr },
+    #[assoc(
         name = quote! {Vec<#_ty>}.to_token_stream(),
         length = ByteLen::known_fixed_unknown_length(
             4,
@@ -236,8 +267,6 @@ pub enum Value {
     Vec { ty: Box<Self>, max_length: usize },
     #[assoc(
         name = _ty.to_token_stream(),
-        min_variable_byte_len = quote! {+ <#_ty>::MIN_BYTE_LEN},
-        max_variable_byte_len = quote! {+ <#_ty>::MAX_BYTE_LEN},
         length = ByteLen::fully_unknown(
             quote! {<#_ty>::MIN_BYTE_LEN},
             quote! {<#_ty>::MAX_BYTE_LEN},
@@ -249,8 +278,8 @@ pub enum Value {
 
 impl Value {
     pub fn from_type(ty: &syn::Type) -> Self {
-        if let syn::Type::Path(path) = ty {
-            match path.path.get_ident() {
+        match ty {
+            syn::Type::Path(path) => match path.path.get_ident() {
                 Some(ident) => {
                     return match ident.to_string().as_str() {
                         "bool" => Self::Bool,
@@ -291,7 +320,14 @@ impl Value {
                     }
                     _ => (),
                 },
+            },
+            syn::Type::Array(syn::TypeArray { elem, len, .. }) => {
+                return Self::Array {
+                    ty: Box::new(Self::from_type(elem)),
+                    length: len.clone(),
+                };
             }
+            _ => {}
         }
         Self::Delegated {
             ty: Box::new(ty.clone()),
