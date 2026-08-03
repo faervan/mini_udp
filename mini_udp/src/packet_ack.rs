@@ -68,7 +68,7 @@ mod test {
 
     #[test]
     fn acknowledge() {
-        let (mut com1, mut com2) = crate::sender::test_init::<_, bool>(7300);
+        let (mut com1, mut com2) = crate::communicator::test_init::<_, bool>(7300);
         com1.write_reliable(InnerUdpMessage::Hello);
         assert_eq!(com1.inner.reliable_send_packets.iter().count(), 0);
         com1.tick().unwrap();
