@@ -73,6 +73,20 @@ impl From<TryFromSliceError> for ByteReprError {
     }
 }
 
+impl ByteRepr for () {
+    const MIN_BYTE_LEN: usize = 0;
+    const MAX_BYTE_LEN: usize = 0;
+    fn byte_len(&self) -> usize {
+        0
+    }
+    fn write_to_bytes(&self, _bytes: &mut [u8]) -> Result<(), ByteReprError> {
+        Ok(())
+    }
+    fn from_bytes(_bytes: &[u8]) -> Result<Self, ByteReprError> {
+        Ok(())
+    }
+}
+
 impl ByteRepr for bool {
     const MIN_BYTE_LEN: usize = 1;
     const MAX_BYTE_LEN: usize = 1;
