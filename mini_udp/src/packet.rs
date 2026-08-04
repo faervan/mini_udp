@@ -25,16 +25,6 @@ pub struct Packet<M: ByteRepr> {
 
 impl<M: ByteRepr> Packet<M> {
     #[inline(always)]
-    pub fn new(ack: PacketAck, messages: impl IntoIterator<Item = M>) -> Self {
-        Self {
-            ack,
-            reliable: true,
-            ordered: false,
-            messages: messages.into_iter().collect(),
-        }
-    }
-
-    #[inline(always)]
     pub fn heartbeat(ack: PacketAck) -> Self {
         Self {
             ack,
@@ -45,30 +35,28 @@ impl<M: ByteRepr> Packet<M> {
     }
 }
 
-#[derive(ByteRepr, Debug, PartialEq, Hash, Eq, Clone, Copy)]
-pub enum InnerUdpMessage {
-    Hello,
-    Wave(u16),
-}
-
 #[cfg(test)]
-mod test {
-    use crate::{
-        packet::{InnerUdpMessage, Packet},
-        prelude::*,
-        ring_buffer::RingBuffer,
-    };
+pub mod test {
+    use crate::{packet::Packet, prelude::*, ring_buffer::RingBuffer};
+
+    #[derive(ByteRepr, Debug, PartialEq, Hash, Eq, Clone, Copy)]
+    pub enum InnerUdpMessage {
+        Hello,
+        Wave(u16),
+    }
 
     #[test]
     fn packet_byte_repr() {
-        let packet = Packet::new(
-            PacketAck::new::<bool>(0, &RingBuffer::new(), &RingBuffer::new()),
-            [
+        let packet = Packet {
+            ack: PacketAck::new::<bool>(0, &RingBuffer::new(), &RingBuffer::new()),
+            reliable: true,
+            ordered: false,
+            messages: vec![
                 InnerUdpMessage::Wave(12),
                 InnerUdpMessage::Wave(9284),
                 InnerUdpMessage::Hello,
             ],
-        );
+        };
         assert_eq!(PacketAck::MIN_BYTE_LEN, 14);
         assert_eq!(Packet::<InnerUdpMessage>::MIN_BYTE_LEN, 20);
         assert_eq!(Packet::<InnerUdpMessage>::MAX_BYTE_LEN, 3020);

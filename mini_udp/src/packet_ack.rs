@@ -64,7 +64,7 @@ impl PacketAck {
 
 #[cfg(test)]
 mod test {
-    use crate::{packet::InnerUdpMessage, prelude::*};
+    use crate::{packet::test::InnerUdpMessage, prelude::*};
 
     #[test]
     fn acknowledge() {

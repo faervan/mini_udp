@@ -280,7 +280,7 @@ mod test {
 
     use tracing::debug;
 
-    use crate::{packet::InnerUdpMessage, prelude::*};
+    use crate::{packet::test::InnerUdpMessage, prelude::*};
 
     #[test]
     fn packet_roundtrip() {

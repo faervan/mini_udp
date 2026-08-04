@@ -7,7 +7,7 @@ pub mod communicator;
 mod packet;
 mod packet_ack;
 pub mod prelude;
-mod ring_buffer;
+pub mod ring_buffer;
 
 #[doc(hidden)]
 pub use tracing;
