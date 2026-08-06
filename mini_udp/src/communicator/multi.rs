@@ -75,6 +75,23 @@ impl<SEND: ByteRepr + Debug, RECV: ByteRepr + Debug> MultiCommunicator<SEND, REC
         while let Ok((n, addr)) = self.socket.socket.recv_from(&mut self.socket.data_buffer) {
             let com = self.coms.entry(addr).or_default();
             com.read_packet(n, &mut self.socket);
+            #[cfg(debug_assertions)]
+            if self.socket.delay_packet(Some(addr), n) {
+                continue;
+            }
+            on_recv.on_recv(
+                UdpCommunicatorMut {
+                    socket: &mut self.socket,
+                    addr,
+                    inner: com,
+                },
+                &mut state,
+            );
+        }
+        #[cfg(debug_assertions)]
+        while let Some((n, Some(addr))) = self.socket.read_delayed() {
+            let com = self.coms.entry(addr).or_default();
+            com.read_packet(n, &mut self.socket);
             on_recv.on_recv(
                 UdpCommunicatorMut {
                     socket: &mut self.socket,
@@ -372,6 +389,12 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiUdpCommunicator<SEND, RECV> {
     #[cfg(debug_assertions)]
     pub fn with_fake_unreliablity(mut self) -> Self {
         self.socket = self.socket.with_fake_unreliablity();
+        self
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn with_fake_delay(mut self, delay_ms: std::ops::Range<u64>) -> Self {
+        self.socket = self.socket.with_fake_delay(delay_ms);
         self
     }
 

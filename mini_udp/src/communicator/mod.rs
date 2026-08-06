@@ -245,6 +245,12 @@ impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
     }
 
     #[cfg(debug_assertions)]
+    pub fn with_fake_delay(mut self, delay_ms: std::ops::Range<u64>) -> Self {
+        self.socket = self.socket.with_fake_delay(delay_ms);
+        self
+    }
+
+    #[cfg(debug_assertions)]
     pub fn with_debug_logs(mut self) -> Self {
         self.socket = self.socket.with_debug_logs();
         self
@@ -276,7 +282,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashSet, time::Duration};
+    use std::{collections::HashSet, thread::sleep, time::Duration};
 
     use tracing::debug;
 
@@ -375,5 +381,56 @@ mod test {
         }
 
         assert_eq!(received, send);
+    }
+
+    #[test]
+    fn test_fake_delay() {
+        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7208);
+        com1.socket = com1.socket.with_debug_logs();
+        com2.socket = com2.socket.with_fake_delay(70..80);
+        let msg = InnerUdpMessage::Wave(u16::MAX);
+        com1.write_reliable(msg);
+        let start = Instant::now();
+        com1.send().unwrap();
+        loop {
+            sleep(Duration::from_millis(1));
+            com2.recv();
+            if let Some(received) = com2.read() {
+                assert_eq!(received, msg);
+                assert!(start.elapsed().as_millis() > 70);
+                assert!(start.elapsed().as_millis() < 82);
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn test_fake_delay_multi() {
+        let _ = tracing_subscriber::FmtSubscriber::builder()
+            .with_test_writer()
+            .with_max_level(tracing::Level::DEBUG)
+            .try_init();
+        let mut multi_com = MultiUdpCommunicator::<(), isize>::bind("0.0.0.0:7210")
+            .with_debug_logs()
+            .with_fake_delay(25..26);
+        let mut com = UdpCommunicator::<isize, ()>::default();
+        com.connect("0.0.0.0:7210").unwrap();
+        let msg = -240_594;
+        com.write_ordered(msg);
+        let start = Instant::now();
+        com.send().unwrap();
+        let mut break_loop = false;
+        loop {
+            sleep(Duration::from_millis(1));
+            multi_com.recv(|mut com: UdpCommunicatorMut<_, _>| {
+                assert_eq!(com.read_ordered().unwrap(), msg);
+                assert!(start.elapsed().as_millis() > 24);
+                assert!(start.elapsed().as_millis() < 28);
+                break_loop = true;
+            });
+            if break_loop {
+                break;
+            }
+        }
     }
 }

@@ -106,6 +106,14 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         RECV: Debug,
     {
         while let Ok(n) = socket.socket.recv(&mut socket.data_buffer) {
+            #[cfg(debug_assertions)]
+            if socket.delay_packet(None, n) {
+                continue;
+            }
+            self.read_packet(n, socket);
+        }
+        #[cfg(debug_assertions)]
+        while let Some((n, _)) = socket.read_delayed() {
             self.read_packet(n, socket);
         }
     }
