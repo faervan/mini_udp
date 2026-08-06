@@ -8,8 +8,10 @@ pub struct RingBuffer<T, const NUM_ITEMS: usize = 32> {
 }
 
 impl<T, const NUM_ITEMS: usize> Default for RingBuffer<T, NUM_ITEMS> {
+    /// `NUM_ITEMS` has to be a power of 2
     fn default() -> Self {
         assert!(NUM_ITEMS < u16::MAX as usize);
+        assert_eq!(u16::MAX % NUM_ITEMS as u16, NUM_ITEMS as u16 - 1);
         Self {
             newest: u16::MAX,
             items: std::array::from_fn(|_| None),
@@ -18,8 +20,8 @@ impl<T, const NUM_ITEMS: usize> Default for RingBuffer<T, NUM_ITEMS> {
 }
 
 impl<T, const NUM_ITEMS: usize> RingBuffer<T, NUM_ITEMS> {
+    /// `NUM_ITEMS` has to be a power of 2
     pub fn new() -> Self {
-        assert_eq!(u16::MAX % NUM_ITEMS as u16, NUM_ITEMS as u16 - 1);
         Self::default()
     }
 
