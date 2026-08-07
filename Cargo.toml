@@ -5,10 +5,16 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+description = "A minimal implementation of a reliability protocol on top of UDP for game networking"
 authors = ["faervan <faervan@proton.me>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/faervan/mini_udp"
+keywords = ["gamedev", "udp", "networking", "reliable"]
+categories = ["network-programming", "game-development"]
+exclude = ["justfile"]
 
 [workspace.dependencies]
-mini_udp_derive.path = "derive"
+mini_udp_derive = { path = "derive", version = "0.1.0" }
 
 crc = "3.4"
 rand = "0.10"

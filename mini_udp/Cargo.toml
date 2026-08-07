@@ -2,7 +2,13 @@
 name = "mini_udp"
 version.workspace = true
 edition.workspace = true
+description.workspace = true
 authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude.workspace = true
 
 [features]
 default = []
