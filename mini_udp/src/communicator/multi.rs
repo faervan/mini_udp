@@ -387,8 +387,14 @@ where
 
 impl<SEND: ByteRepr, RECV: ByteRepr> MultiUdpCommunicator<SEND, RECV> {
     #[cfg(debug_assertions)]
-    pub fn with_fake_unreliablity(mut self) -> Self {
-        self.socket = self.socket.with_fake_unreliablity();
+    pub fn with_fake_drop(mut self, drop_probability: f64) -> Self {
+        self.socket = self.socket.with_fake_drop(drop_probability);
+        self
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn with_fake_corruption(mut self, corruption_probability: f64) -> Self {
+        self.socket = self.socket.with_fake_corruption(corruption_probability);
         self
     }
 

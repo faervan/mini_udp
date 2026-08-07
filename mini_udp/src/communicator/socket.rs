@@ -19,7 +19,9 @@ pub(crate) struct UdpCommunicatorSocket {
     pub socket: UdpSocket,
     pub data_buffer: [u8; MAX_PACKET_LEN],
     #[cfg(debug_assertions)]
-    pub fake_unreliable: bool,
+    pub drop_probability: Option<f64>,
+    #[cfg(debug_assertions)]
+    pub corruption_probability: Option<f64>,
     #[cfg(debug_assertions)]
     fake_delay: std::ops::Range<u64>,
     #[cfg(debug_assertions)]
@@ -46,7 +48,9 @@ impl CommunicatorSocket for UdpCommunicatorSocket {
             socket,
             data_buffer: [0; MAX_PACKET_LEN],
             #[cfg(debug_assertions)]
-            fake_unreliable: false,
+            drop_probability: None,
+            #[cfg(debug_assertions)]
+            corruption_probability: None,
             #[cfg(debug_assertions)]
             fake_delay: 0..0,
             #[cfg(debug_assertions)]
@@ -85,8 +89,14 @@ impl SocketSendAddr for SocketAddr {
 
 impl UdpCommunicatorSocket {
     #[cfg(debug_assertions)]
-    pub fn with_fake_unreliablity(mut self) -> Self {
-        self.fake_unreliable = true;
+    pub fn with_fake_drop(mut self, drop_probability: f64) -> Self {
+        self.drop_probability = Some(drop_probability);
+        self
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn with_fake_corruption(mut self, corruption_probability: f64) -> Self {
+        self.corruption_probability = Some(corruption_probability);
         self
     }
 

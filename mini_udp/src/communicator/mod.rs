@@ -239,8 +239,14 @@ impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
     }
 
     #[cfg(debug_assertions)]
-    pub fn with_fake_unreliablity(mut self) -> Self {
-        self.socket = self.socket.with_fake_unreliablity();
+    pub fn with_fake_drop(mut self, drop_probability: f64) -> Self {
+        self.socket = self.socket.with_fake_drop(drop_probability);
+        self
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn with_fake_corruption(mut self, corruption_probability: f64) -> Self {
+        self.socket = self.socket.with_fake_corruption(corruption_probability);
         self
     }
 
@@ -328,8 +334,12 @@ mod test {
     #[test]
     fn test_reliability() {
         let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7204);
-        com1.socket = com1.socket.with_fake_unreliablity().with_debug_logs();
-        com2.socket = com2.socket.with_fake_unreliablity();
+        com1.socket = com1
+            .socket
+            .with_fake_drop(0.4)
+            .with_fake_corruption(0.1)
+            .with_debug_logs();
+        com2.socket = com2.socket.with_fake_drop(0.6).with_fake_corruption(0.2);
         let mut send = HashSet::new();
         assert!(send.insert(InnerUdpMessage::Hello));
         for i in 0..20000 {
@@ -356,8 +366,12 @@ mod test {
     #[test]
     fn test_ordered_reliability() {
         let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7206);
-        com1.socket = com1.socket.with_fake_unreliablity().with_debug_logs();
-        com2.socket = com2.socket.with_fake_unreliablity();
+        com1.socket = com1
+            .socket
+            .with_fake_drop(0.4)
+            .with_fake_corruption(0.1)
+            .with_debug_logs();
+        com2.socket = com2.socket.with_fake_drop(0.6).with_fake_corruption(0.2);
         let mut send = vec![];
         for i in 0..20000 {
             send.push(InnerUdpMessage::Wave(i));

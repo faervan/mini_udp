@@ -131,7 +131,9 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
             .sequence_id;
         #[cfg(debug_assertions)]
         // Fake UDP unreliability
-        if socket.fake_unreliable && rand::random_bool(0.2) {
+        if let Some(p) = socket.corruption_probability
+            && rand::random_bool(p)
+        {
             let corrupt_num = rand::random_range(0..n * 8);
             if socket.debug_logs {
                 debug!("Corrupting {corrupt_num} bits of packet #{packet}",);
@@ -153,7 +155,9 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
             Ok(packet) => {
                 #[cfg(debug_assertions)]
                 // Fake UDP unreliability
-                if socket.fake_unreliable && rand::random_bool(0.5) {
+                if let Some(p) = socket.drop_probability
+                    && rand::random_bool(p)
+                {
                     return;
                 }
                 #[cfg(test)]
