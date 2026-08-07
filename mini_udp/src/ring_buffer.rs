@@ -136,7 +136,7 @@ impl<T, const NUM_ITEMS: usize> RingBuffer<T, NUM_ITEMS> {
 
     /// Iterate over the indices of all existing items in chronological order (oldest first).
     /// The indices returned will increase, but wrap around at `u16::MAX`.
-    pub fn keys<'a>(&'a self) -> IterKeys<'a, T, NUM_ITEMS> {
+    pub fn keys(&self) -> IterKeys<'_, T, NUM_ITEMS> {
         IterKeys {
             i: self.newest.wrapping_sub(NUM_ITEMS as u16 - 1),
             ring: self,
@@ -161,7 +161,7 @@ impl<T, const NUM_ITEMS: usize> RingBuffer<T, NUM_ITEMS> {
 
     #[inline(always)]
     pub fn len(&self) -> usize {
-        self.iter().count()
+        self.items.iter().filter(|i| i.is_some()).count()
     }
 
     #[inline(always)]
@@ -186,6 +186,19 @@ impl<'a, T, const NUM_ITEMS: usize> Iterator for Iter<'a, T, NUM_ITEMS> {
         }
         None
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.ring.len();
+        if len == 0 || wrapping_gt(self.i.wrapping_sub(1), self.ring.newest, NUM_ITEMS as u16) {
+            (0, Some(0))
+        } else {
+            let unvisited = self.ring.newest.wrapping_sub(self.i).wrapping_add(1) as usize;
+            (
+                len.saturating_sub(NUM_ITEMS.saturating_sub(unvisited)),
+                Some(unvisited.min(len)),
+            )
+        }
+    }
 }
 
 pub struct IterMut<'a, T, const NUM_ITEMS: usize> {
@@ -209,6 +222,22 @@ impl<'a, T, const NUM_ITEMS: usize> Iterator for IterMut<'a, T, NUM_ITEMS> {
         }
         None
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        unsafe {
+            let ring = &mut *self.ring;
+            let len = ring.len();
+            if len == 0 || wrapping_gt(self.i.wrapping_sub(1), ring.newest, NUM_ITEMS as u16) {
+                (0, Some(0))
+            } else {
+                let unvisited = ring.newest.wrapping_sub(self.i).wrapping_add(1) as usize;
+                (
+                    len.saturating_sub(NUM_ITEMS.saturating_sub(unvisited)),
+                    Some(unvisited.min(len)),
+                )
+            }
+        }
+    }
 }
 
 pub struct IterValues<'a, T, const NUM_ITEMS: usize> {
@@ -226,6 +255,19 @@ impl<'a, T, const NUM_ITEMS: usize> Iterator for IterValues<'a, T, NUM_ITEMS> {
             }
         }
         None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.ring.len();
+        if len == 0 || wrapping_gt(self.i.wrapping_sub(1), self.ring.newest, NUM_ITEMS as u16) {
+            (0, Some(0))
+        } else {
+            let unvisited = self.ring.newest.wrapping_sub(self.i).wrapping_add(1) as usize;
+            (
+                len.saturating_sub(NUM_ITEMS.saturating_sub(unvisited)),
+                Some(unvisited.min(len)),
+            )
+        }
     }
 }
 
@@ -250,6 +292,22 @@ impl<'a, T, const NUM_ITEMS: usize> Iterator for IterValuesMut<'a, T, NUM_ITEMS>
         }
         None
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        unsafe {
+            let ring = &mut *self.ring;
+            let len = ring.len();
+            if len == 0 || wrapping_gt(self.i.wrapping_sub(1), ring.newest, NUM_ITEMS as u16) {
+                (0, Some(0))
+            } else {
+                let unvisited = ring.newest.wrapping_sub(self.i).wrapping_add(1) as usize;
+                (
+                    len.saturating_sub(NUM_ITEMS.saturating_sub(unvisited)),
+                    Some(unvisited.min(len)),
+                )
+            }
+        }
+    }
 }
 
 pub struct IterKeys<'a, T, const NUM_ITEMS: usize> {
@@ -267,6 +325,19 @@ impl<'a, T, const NUM_ITEMS: usize> Iterator for IterKeys<'a, T, NUM_ITEMS> {
             }
         }
         None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.ring.len();
+        if len == 0 || wrapping_gt(self.i.wrapping_sub(1), self.ring.newest, NUM_ITEMS as u16) {
+            (0, Some(0))
+        } else {
+            let unvisited = self.ring.newest.wrapping_sub(self.i).wrapping_add(1) as usize;
+            (
+                len.saturating_sub(NUM_ITEMS.saturating_sub(unvisited)),
+                Some(unvisited.min(len)),
+            )
+        }
     }
 }
 
@@ -437,11 +508,75 @@ mod test {
     #[test]
     fn iterate() {
         let mut ring = super::RingBuffer::<u16>::new();
-        ring.push(0);
-        ring.push(1);
-        let mut iter = ring.values();
-        assert_eq!(iter.next(), Some(&0));
-        assert_eq!(iter.next(), Some(&1));
+        assert_eq!(ring.push(0), 0);
+        assert_eq!(ring.push(1), 1);
+        assert_eq!(ring.len(), 2);
+        let mut iter = ring.iter();
+        assert_eq!(iter.size_hint(), (2, Some(2)));
+        assert_eq!(iter.next(), Some((0, &0)));
+        assert_eq!(iter.size_hint(), (0, Some(1)));
+        assert_eq!(iter.next(), Some((1, &1)));
+        assert_eq!(iter.size_hint(), (0, Some(0)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn iter_size_hint() {
+        let mut ring = super::RingBuffer::<u16>::new();
+        for i in 0..33 {
+            assert_eq!(ring.push(i), i);
+        }
+        assert_eq!(ring.len(), 32);
+        let mut iter = ring.iter();
+        for i in 0..32 {
+            assert_eq!(iter.size_hint(), (32 - i, Some(32 - i)));
+            assert_eq!(iter.next(), Some((i as u16 + 1, &(i as u16 + 1))));
+        }
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn iter_size_hint2() {
+        let mut ring = super::RingBuffer::<u16>::new();
+        for i in 5..33 {
+            ring.insert(i, i);
+        }
+        assert_eq!(ring.len(), 28);
+        let mut iter = ring.iter();
+        for i in 0..28 {
+            assert_eq!(iter.next(), Some((i as u16 + 5, &(i as u16 + 5))));
+            assert_eq!(iter.size_hint(), (23_usize.saturating_sub(i), Some(27 - i)));
+        }
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn iter_mut_size_hint() {
+        let mut ring = super::RingBuffer::<u16>::new();
+        for i in 0..33 {
+            assert_eq!(ring.push(i), i);
+        }
+        assert_eq!(ring.len(), 32);
+        let mut iter = ring.iter_mut();
+        for i in 0..32 {
+            assert_eq!(iter.size_hint(), (32 - i, Some(32 - i)));
+            assert_eq!(iter.next(), Some((i as u16 + 1, &mut (i as u16 + 1))));
+        }
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn iter_mut_size_hint2() {
+        let mut ring = super::RingBuffer::<u16>::new();
+        for i in 5..33 {
+            ring.insert(i, i);
+        }
+        assert_eq!(ring.len(), 28);
+        let mut iter = ring.iter_mut();
+        for i in 0..28 {
+            assert_eq!(iter.next(), Some((i as u16 + 5, &mut (i as u16 + 5))));
+            assert_eq!(iter.size_hint(), (23_usize.saturating_sub(i), Some(27 - i)));
+        }
         assert_eq!(iter.next(), None);
     }
 
@@ -460,6 +595,28 @@ mod test {
             assert_eq!(*item, i);
             i += 1;
         }
+    }
+
+    #[test]
+    fn iterate_values() {
+        let mut ring = super::RingBuffer::<u16>::new();
+        ring.push(0);
+        ring.push(1);
+        let mut values = ring.values();
+        assert_eq!(values.next(), Some(&0));
+        assert_eq!(values.next(), Some(&1));
+        assert_eq!(values.next(), None);
+    }
+
+    #[test]
+    fn iterate_values_mut() {
+        let mut ring = super::RingBuffer::<u16>::new();
+        ring.push(0);
+        ring.push(1);
+        let mut values = ring.values_mut();
+        assert_eq!(values.next(), Some(&mut 0));
+        assert_eq!(values.next(), Some(&mut 1));
+        assert_eq!(values.next(), None);
     }
 
     #[test]
