@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Debug};
+use std::collections::VecDeque;
 
 use crate::{
     communicator::{CRC, SocketSendAddr},
@@ -375,7 +375,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
     }
 }
 
-fn flush_messages<SEND: ByteRepr + Debug, RECV: ByteRepr>(
+fn flush_messages<SEND: ByteRepr, RECV: ByteRepr>(
     #[cfg(debug_assertions)] socket: &UdpCommunicatorSocket,
     send_packets: &mut RingBuffer<(Instant, Packet<SEND>)>,
     reliable_received: &RingBuffer<()>,

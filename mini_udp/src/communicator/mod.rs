@@ -1,7 +1,4 @@
-use std::{
-    fmt::Debug,
-    net::{SocketAddr, ToSocketAddrs},
-};
+use std::net::{SocketAddr, ToSocketAddrs};
 
 use crate::prelude::*;
 
@@ -29,20 +26,29 @@ const CRC_ALGORITHM: crc::Algorithm<u32> = crc::Algorithm {
 const CRC: crc::Crc<u32> = crc::Crc::<u32>::new(&CRC_ALGORITHM);
 
 pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
+    /// Queue a message to be send unreliably.
     fn write(&mut self, message: SEND);
+    /// Queue a message to be send reliably, but not necessarily in order.
     fn write_reliable(&mut self, message: SEND);
+    /// Queue a message to be send reliably, in order. The receiver will make sure not to show this
+    /// message before any previously send, ordered messages.
     fn write_ordered(&mut self, message: SEND);
     /// Add a heartbeat to the internal send queue. This behaves like the other `write*` methods,
     /// it does not actually send the packet yet.
     fn write_heartbeat(&mut self);
+    /// Try to read the next unreliable or reliable-unordered message received.
     fn read(&mut self) -> Option<RECV>;
+    /// Try to read the reliable-ordered message received.
     fn read_ordered(&mut self) -> Option<RECV>;
     /// Returns `true` if there are any pending messages to be send / packets to get acknowledged.
     fn has_work(&self) -> bool;
     /// Returns the [Instant] of time at which the last packet has been received.
-    /// Before any packets have been received, this returns the [Instant] at which [Communicator]
-    /// has been constructed.
+    /// Before any packets have been received, this returns the [Instant] at which this
+    /// [Communicator] has been constructed.
     fn last_seen(&self) -> &Instant;
+    /// Returns the [Instant] of time at which the last packet has been send.
+    /// Before any packets have been send, this returns the [Instant] at which this [Communicator]
+    /// has been constructed.
     fn last_send(&self) -> &Instant;
 }
 
@@ -52,6 +58,7 @@ pub struct UdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
 }
 
 impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for UdpCommunicator<SEND, RECV> {
+    /// Create a new [`UdpCommunicator`], binding it to the provided `addr`.
     fn bind<A: ToSocketAddrs>(addr: A) -> Self {
         Self {
             socket: UdpCommunicatorSocket::bind(addr),
@@ -74,6 +81,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for UdpCommunicator<SEND
     }
 }
 
+/// A connection of an [`MultiUdpCommunicator`].
 pub struct UdpCommunicatorMut<'a, SEND: ByteRepr, RECV: ByteRepr> {
     socket: &'a UdpCommunicatorSocket,
     pub addr: SocketAddr,
@@ -193,59 +201,69 @@ impl<'a, SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV>
 
 impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
     #[inline(always)]
+    /// Connect to the provided `addr`.
     pub fn connect<A: ToSocketAddrs>(self, addr: A) -> Result<Self, std::io::Error> {
         self.socket.socket.connect(addr)?;
         Ok(self)
     }
 
     #[inline(always)]
-    pub fn recv(&mut self)
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
+    /// Receive all new packets and deserialize them into messages.
+    /// You can read the new messages using [`UdpCommunicator::read`] and [`UdpCommunicator::read_ordered`].
+    pub fn recv(&mut self) {
         self.inner.receive(&mut self.socket);
     }
 
     #[inline(always)]
-    pub fn send(&mut self) -> Result<(), ByteReprError>
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
+    /// Send all pending messages. This will also resend reliable, unacknowledged packets if the
+    /// configured resend interval has been reached.
+    /// If new packets have been received since the last time this method was called and there are
+    /// no pending messages to be send or packets to be resend, this will send an empty heartbeat
+    /// packet to the connected receiver.
+    pub fn send(&mut self) -> Result<(), ByteReprError> {
         self.inner.send((), &mut self.socket)
     }
 
     #[inline(always)]
-    /// A shorthand for [`self.recv()`](Self::recv) followed by [`self.send()`](Self::send)
-    pub fn tick(&mut self) -> Result<(), ByteReprError>
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
+    /// A shorthand for [`self.recv()`](Self::recv) followed by [`self.send()`](Self::send).
+    pub fn tick(&mut self) -> Result<(), ByteReprError> {
         self.recv();
         self.send()
     }
 
     #[cfg(debug_assertions)]
+    /// Simulate fake UDP unreliability by randomly dropping packets according to the provided
+    /// probability.
+    /// This is currently only available on debug builds.
     pub fn with_fake_drop(mut self, drop_probability: f64) -> Self {
         self.socket = self.socket.with_fake_drop(drop_probability);
         self
     }
 
     #[cfg(debug_assertions)]
+    /// Simulate fake UDP unreliability by randomly corrupting bits of packets according to the
+    /// provided probability (the probability determines how likely it is for a packet to be
+    /// corrupted, not how many bits will be flipped).
+    /// This is currently only available on debug builds.
     pub fn with_fake_corruption(mut self, corruption_probability: f64) -> Self {
         self.socket = self.socket.with_fake_corruption(corruption_probability);
         self
     }
 
     #[cfg(debug_assertions)]
+    /// Add an extra delay to packet receiving by a random amount of milliseconds in the range of
+    /// the provided `delay_ms`.
+    /// Only packet receiving is affected by this, not sending.
+    /// This is currently only available on debug builds.
     pub fn with_fake_delay(mut self, delay_ms: std::ops::Range<u64>) -> Self {
         self.socket = self.socket.with_fake_delay(delay_ms);
         self
     }
 
     #[cfg(debug_assertions)]
+    /// Enable debug logs like notifications when a packet has been artificially corrupted by
+    /// [`Self::with_fake_corruption`].
+    /// This is currently only available on debug builds.
     pub fn with_debug_logs(mut self) -> Self {
         self.socket = self.socket.with_debug_logs();
         self

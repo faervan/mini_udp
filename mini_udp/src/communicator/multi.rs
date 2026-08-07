@@ -1,12 +1,16 @@
 use std::{
     collections::HashMap,
-    fmt::Debug,
     net::{SocketAddr, ToSocketAddrs},
 };
 
 use crate::{communicator::UdpCommunicatorMut, prelude::*};
 
 pub trait MultiCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
+    /// Create a connection to the provided `addr`.
+    fn connect<A: ToSocketAddrs>(
+        &mut self,
+        addr: A,
+    ) -> Result<UdpCommunicatorMut<'_, SEND, RECV>, std::io::Error>;
     /// Receive all new packets. If no "connection" exists for the [`SocketAddr`] a new packet was
     /// received from, one will be created.
     /// For each packet that was received, the provided `on_recv` callback will be called, giving
@@ -34,34 +38,48 @@ pub trait MultiCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     fn recv<M, CB>(&mut self, on_recv: CB)
     where
         CB: OnReceiveCallback<M, SEND, RECV>;
+    /// Send all pending messages. This will also resend reliable, unacknowledged packets if the
+    /// configured resend interval has been reached.
+    /// If new packets have been received since the last time this method was called and there are
+    /// no pending messages to be send or packets to be resend, this will send an empty heartbeat
+    /// packet to the connected receiver.
     fn send(&mut self);
     /// Iterate over all client connections. A client connection is automatically created when
     /// [`recv`](Self::recv) reads a packet from a [`SocketAddr`] that does not already have a
     /// connection. Connections are never automatically deleted by [`mini_udp`].
     fn iter_mut(&mut self) -> IterMut<'_, SEND, RECV>;
+    /// Broadcast the provided `message` to all connections reliably.
     fn broadcast(&mut self, message: SEND)
     where
         SEND: Clone;
+    /// Broadcast the provided `message` to all connections except `exception` reliably.
     fn broadcast_except(&mut self, message: SEND, exception: SocketAddr)
     where
         SEND: Clone;
+    /// Execute `f` for each connection.
     fn for_each<F>(&mut self, f: F)
     where
-        SEND: Clone,
         F: FnMut(UdpCommunicatorMut<'_, SEND, RECV>);
+    /// Remove all connections for which the provided `filter` closure returns `false`.
     fn retain<F>(&mut self, filter: F)
     where
         F: FnMut(UdpCommunicatorMut<'_, SEND, RECV>) -> bool;
+    /// Remove the connection to `addr`, returning whether a connection to `addr` existed.
     fn remove(&mut self, addr: &SocketAddr) -> bool;
+    /// Get the connection to `addr`, if it exists, so you can read or queue messages.
+    fn get_mut<'a>(
+        &'a mut self,
+        addr: &'a SocketAddr,
+    ) -> Option<UdpCommunicatorMut<'a, SEND, RECV>>;
+    #[inline(always)]
+    /// A shorthand for [`self.recv()`](Self::recv) followed by [`self.send()`](Self::send).
     fn tick<M, CB>(&mut self, on_recv: CB)
     where
         CB: OnReceiveCallback<M, SEND, RECV>,
-        SEND: Debug + Clone,
-        RECV: Debug;
-    fn get_mut<'a>(
-        &'a mut self,
-        client: &'a SocketAddr,
-    ) -> Option<UdpCommunicatorMut<'a, SEND, RECV>>;
+    {
+        self.recv(on_recv);
+        self.send();
+    }
 }
 
 pub struct MultiUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
@@ -77,6 +95,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> Default for MultiUdpCommunicator<SEND, RECV
 }
 
 impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for MultiUdpCommunicator<SEND, RECV> {
+    /// Create a new [`MultiUdpCommunicator`], binding it to the provided `addr`.
     fn bind<A: ToSocketAddrs>(addr: A) -> Self {
         Self {
             socket: UdpCommunicatorSocket::bind(addr),
@@ -102,6 +121,20 @@ impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for MultiUdpCommunicator
 impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     for MultiUdpCommunicator<SEND, RECV>
 {
+    fn connect<A: ToSocketAddrs>(
+        &mut self,
+        addr: A,
+    ) -> Result<UdpCommunicatorMut<'_, SEND, RECV>, std::io::Error> {
+        let addr = addr.to_socket_addrs()?.next().ok_or_else(|| {
+            std::io::Error::other("The provided `addr` parses into an empty SocketAddr iterator")
+        })?;
+        Ok(UdpCommunicatorMut {
+            socket: &self.socket,
+            addr,
+            inner: self.coms.entry(addr).or_default(),
+        })
+    }
+
     fn recv<M, CB>(&mut self, mut on_recv: CB)
     where
         CB: OnReceiveCallback<M, SEND, RECV>,
@@ -174,7 +207,6 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
 
     fn for_each<F>(&mut self, mut f: F)
     where
-        SEND: Clone,
         F: FnMut(UdpCommunicatorMut<'_, SEND, RECV>),
     {
         for (addr, com) in self.coms.iter_mut() {
@@ -203,38 +235,14 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
         self.coms.remove(addr).is_some()
     }
 
-    fn tick<M, CB>(&mut self, mut on_recv: CB)
-    where
-        CB: OnReceiveCallback<M, SEND, RECV>,
-        SEND: Debug + Clone,
-        RECV: Debug,
-    {
-        let mut state = on_recv.prepare();
-        while let Ok((n, addr)) = self.socket.socket.recv_from(&mut self.socket.data_buffer) {
-            let com = self.coms.entry(addr).or_default();
-            com.read_packet(n, &mut self.socket);
-            on_recv.on_recv(
-                UdpCommunicatorMut {
-                    socket: &self.socket,
-                    addr,
-                    inner: com,
-                },
-                &mut state,
-            );
-        }
-        on_recv.finish(self, state);
-
-        self.send();
-    }
-
     fn get_mut<'a>(
         &'a mut self,
-        client: &'a SocketAddr,
+        addr: &'a SocketAddr,
     ) -> Option<UdpCommunicatorMut<'a, SEND, RECV>> {
-        let inner = self.coms.get_mut(client)?;
+        let inner = self.coms.get_mut(addr)?;
         Some(UdpCommunicatorMut {
             socket: &self.socket,
-            addr: *client,
+            addr: *addr,
             inner,
         })
     }
@@ -280,8 +288,8 @@ impl<T, SEND, RECV>
     > for T
 where
     T: FnMut(UdpCommunicatorMut<SEND, RECV>, DelayedBroadcast<SEND>),
-    SEND: ByteRepr + Clone + Debug,
-    RECV: ByteRepr + Debug,
+    SEND: ByteRepr + Clone,
+    RECV: ByteRepr,
 {
     type State = Vec<SEND>;
     fn prepare(&mut self) -> Self::State {
@@ -308,8 +316,8 @@ impl<T, SEND, RECV>
     > for T
 where
     T: FnMut(UdpCommunicatorMut<SEND, RECV>, DelayedBroadcastExcept<SEND>),
-    SEND: ByteRepr + Clone + Debug,
-    RECV: ByteRepr + Debug,
+    SEND: ByteRepr + Clone,
+    RECV: ByteRepr,
 {
     type State = Vec<(SocketAddr, SEND)>;
     fn prepare(&mut self) -> Self::State {
@@ -336,8 +344,8 @@ impl<T, SEND, RECV>
     > for T
 where
     T: FnMut(UdpCommunicatorMut<SEND, RECV>, DelayedForEach<SEND, RECV>),
-    SEND: ByteRepr + Clone + Debug,
-    RECV: ByteRepr + Debug,
+    SEND: ByteRepr,
+    RECV: ByteRepr,
 {
     type State = Vec<DelayedForEachF<SEND, RECV>>;
     fn prepare(&mut self) -> Self::State {
@@ -375,7 +383,7 @@ impl<'a, SEND: ByteRepr + Clone> DelayedBroadcastExcept<'a, SEND> {
 
 type DelayedForEachF<SEND, RECV> = Box<dyn FnMut(UdpCommunicatorMut<'_, SEND, RECV>)>;
 
-pub struct DelayedForEach<'a, SEND: ByteRepr + Clone, RECV: ByteRepr> {
+pub struct DelayedForEach<'a, SEND: ByteRepr, RECV: ByteRepr> {
     for_each: &'a mut Vec<DelayedForEachF<SEND, RECV>>,
 }
 
@@ -418,24 +426,38 @@ where
 
 impl<SEND: ByteRepr, RECV: ByteRepr> MultiUdpCommunicator<SEND, RECV> {
     #[cfg(debug_assertions)]
+    /// Simulate fake UDP unreliability by randomly dropping packets according to the provided
+    /// probability.
+    /// This is currently only available on debug builds.
     pub fn with_fake_drop(mut self, drop_probability: f64) -> Self {
         self.socket = self.socket.with_fake_drop(drop_probability);
         self
     }
 
     #[cfg(debug_assertions)]
+    /// Simulate fake UDP unreliability by randomly corrupting bits of packets according to the
+    /// provided probability (the probability determines how likely it is for a packet to be
+    /// corrupted, not how many bits will be flipped).
+    /// This is currently only available on debug builds.
     pub fn with_fake_corruption(mut self, corruption_probability: f64) -> Self {
         self.socket = self.socket.with_fake_corruption(corruption_probability);
         self
     }
 
     #[cfg(debug_assertions)]
+    /// Add an extra delay to packet receiving by a random amount of milliseconds in the range of
+    /// the provided `delay_ms`.
+    /// Only packet receiving is affected by this, not sending.
+    /// This is currently only available on debug builds.
     pub fn with_fake_delay(mut self, delay_ms: std::ops::Range<u64>) -> Self {
         self.socket = self.socket.with_fake_delay(delay_ms);
         self
     }
 
     #[cfg(debug_assertions)]
+    /// Enable debug logs like notifications when a packet has been artificially corrupted by
+    /// [`Self::with_fake_corruption`].
+    /// This is currently only available on debug builds.
     pub fn with_debug_logs(mut self) -> Self {
         self.socket = self.socket.with_debug_logs();
         self
