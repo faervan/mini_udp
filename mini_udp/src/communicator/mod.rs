@@ -69,8 +69,18 @@ impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for UdpCommunicator<SEND
         }
     }
 
-    fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), std::io::Error> {
-        self.socket.connect(addr)
+    #[inline(always)]
+    fn with_reliable_unordered_resend_interval(mut self, interval: Duration) -> Self {
+        self.socket = self
+            .socket
+            .with_reliable_unordered_resend_interval(interval);
+        self
+    }
+
+    #[inline(always)]
+    fn with_reliable_ordered_resend_interval(mut self, interval: Duration) -> Self {
+        self.socket = self.socket.with_reliable_ordered_resend_interval(interval);
+        self
     }
 }
 
@@ -230,6 +240,12 @@ impl<'a, SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV>
 
 impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
     #[inline(always)]
+    pub fn connect<A: ToSocketAddrs>(self, addr: A) -> Result<Self, std::io::Error> {
+        self.socket.socket.connect(addr)?;
+        Ok(self)
+    }
+
+    #[inline(always)]
     pub fn recv(&mut self)
     where
         SEND: Debug,
@@ -279,16 +295,18 @@ where
     let localhost = std::net::IpAddr::V4(localhost);
     let addr1 = std::net::SocketAddr::new(localhost, port_offset);
     let addr2 = std::net::SocketAddr::new(localhost, port_offset + 1);
-    let mut com1 = UdpCommunicator::<SEND, RECV>::bind(addr1);
-    let mut com2 = UdpCommunicator::<SEND, RECV>::bind(addr2);
-    assert!(com2.connect(addr1).is_ok());
-    assert!(com1.connect(addr2).is_ok());
+    let com1 = UdpCommunicator::<SEND, RECV>::bind(addr1)
+        .connect(addr2)
+        .unwrap();
+    let com2 = UdpCommunicator::<SEND, RECV>::bind(addr2)
+        .connect(addr1)
+        .unwrap();
     (com1, com2)
 }
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashSet, thread::sleep, time::Duration};
+    use std::{collections::HashSet, thread::sleep};
 
     use tracing::debug;
 
@@ -427,8 +445,9 @@ mod test {
         let mut multi_com = MultiUdpCommunicator::<(), isize>::bind("0.0.0.0:7210")
             .with_debug_logs()
             .with_fake_delay(25..26);
-        let mut com = UdpCommunicator::<isize, ()>::default();
-        com.connect("0.0.0.0:7210").unwrap();
+        let mut com = UdpCommunicator::<isize, ()>::default()
+            .connect("0.0.0.0:7210")
+            .unwrap();
         let msg = -240_594;
         com.write_ordered(msg);
         let start = Instant::now();

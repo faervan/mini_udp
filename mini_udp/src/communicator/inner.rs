@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Debug, time::Duration};
+use std::{collections::VecDeque, fmt::Debug};
 
 use crate::{
     communicator::{CRC, SocketSendAddr},
@@ -343,8 +343,10 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         {
             let send_cooldown = if cfg!(test) {
                 Duration::from_millis(3)
+            } else if packet.ordered {
+                socket.reliable_ordered_resend_interval
             } else {
-                Duration::from_millis(100)
+                socket.reliable_unordered_resend_interval
             };
             if last_send.elapsed() > send_cooldown {
                 *last_send = Instant::now();
@@ -425,7 +427,7 @@ fn flush_messages<SEND: ByteRepr + Debug, RECV: ByteRepr>(
         }
         let sequence_id = send_packets.get_next_index();
         let packet = Packet {
-            // TODO! creating a new ack for every iteration is pointless, wasted work
+            // TODO! Creating a new ack for every iteration is pointless, wasted work
             ack: PacketAck::new(sequence_id, reliable_received, ordered_received),
             reliable: true,
             ordered,

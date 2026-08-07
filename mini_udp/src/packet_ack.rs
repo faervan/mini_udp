@@ -82,7 +82,7 @@ mod test {
         com1.tick().unwrap();
         assert_eq!(com1.inner.reliable_send_packets.iter().count(), 5);
         assert_eq!(com2.inner.reliable_received_packets.iter().count(), 0);
-        std::thread::sleep(std::time::Duration::from_millis(350));
+        std::thread::sleep(Duration::from_millis(350));
         com1.tick().unwrap();
         com2.tick().unwrap();
         assert_eq!(com2.inner.reliable_received_packets.iter().count(), 5);

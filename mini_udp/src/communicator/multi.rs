@@ -58,8 +58,18 @@ impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for MultiUdpCommunicator
         }
     }
 
-    fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), std::io::Error> {
-        self.socket.connect(addr)
+    #[inline(always)]
+    fn with_reliable_unordered_resend_interval(mut self, interval: Duration) -> Self {
+        self.socket = self
+            .socket
+            .with_reliable_unordered_resend_interval(interval);
+        self
+    }
+
+    #[inline(always)]
+    fn with_reliable_ordered_resend_interval(mut self, interval: Duration) -> Self {
+        self.socket = self.socket.with_reliable_ordered_resend_interval(interval);
+        self
     }
 }
 
@@ -73,12 +83,12 @@ impl<SEND: ByteRepr + Debug, RECV: ByteRepr + Debug> MultiCommunicator<SEND, REC
     {
         let mut state = CB::prepare();
         while let Ok((n, addr)) = self.socket.socket.recv_from(&mut self.socket.data_buffer) {
-            let com = self.coms.entry(addr).or_default();
-            com.read_packet(n, &mut self.socket);
             #[cfg(debug_assertions)]
             if self.socket.delay_packet(Some(addr), n) {
                 continue;
             }
+            let com = self.coms.entry(addr).or_default();
+            com.read_packet(n, &mut self.socket);
             on_recv.on_recv(
                 UdpCommunicatorMut {
                     socket: &mut self.socket,

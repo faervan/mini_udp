@@ -4,7 +4,16 @@ use crate::prelude::*;
 
 pub trait CommunicatorSocket {
     fn bind<A: ToSocketAddrs>(addr: A) -> Self;
-    fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), std::io::Error>;
+    /// Set the interval at which reliable unordered packets are to be resend if no
+    /// acknowledgement has been received.
+    ///
+    /// The default is 100 milliseconds.
+    fn with_reliable_unordered_resend_interval(self, interval: Duration) -> Self;
+    /// Set the interval at which reliable ordered packets are to be resend if no
+    /// acknowledgement has been received.
+    ///
+    /// The default is 100 milliseconds.
+    fn with_reliable_ordered_resend_interval(self, interval: Duration) -> Self;
 }
 
 pub(crate) trait SocketSendAddr {
@@ -18,6 +27,8 @@ pub(crate) trait SocketSendAddr {
 pub(crate) struct UdpCommunicatorSocket {
     pub socket: UdpSocket,
     pub data_buffer: [u8; MAX_PACKET_LEN],
+    pub reliable_unordered_resend_interval: Duration,
+    pub reliable_ordered_resend_interval: Duration,
     #[cfg(debug_assertions)]
     pub drop_probability: Option<f64>,
     #[cfg(debug_assertions)]
@@ -47,6 +58,8 @@ impl CommunicatorSocket for UdpCommunicatorSocket {
         Self {
             socket,
             data_buffer: [0; MAX_PACKET_LEN],
+            reliable_unordered_resend_interval: Duration::from_millis(100),
+            reliable_ordered_resend_interval: Duration::from_millis(100),
             #[cfg(debug_assertions)]
             drop_probability: None,
             #[cfg(debug_assertions)]
@@ -60,8 +73,14 @@ impl CommunicatorSocket for UdpCommunicatorSocket {
         }
     }
 
-    fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), std::io::Error> {
-        self.socket.connect(addr)
+    fn with_reliable_unordered_resend_interval(mut self, interval: Duration) -> Self {
+        self.reliable_ordered_resend_interval = interval;
+        self
+    }
+
+    fn with_reliable_ordered_resend_interval(mut self, interval: Duration) -> Self {
+        self.reliable_ordered_resend_interval = interval;
+        self
     }
 }
 
@@ -123,7 +142,7 @@ impl UdpCommunicatorSocket {
                 addr,
                 self.data_buffer,
                 n,
-                Instant::now() + std::time::Duration::from_millis(delay_ms),
+                Instant::now() + Duration::from_millis(delay_ms),
             ));
         }
         !self.fake_delay.is_empty()
