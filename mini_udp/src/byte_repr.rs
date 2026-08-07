@@ -140,7 +140,6 @@ impl ByteRepr for i8 {
     }
 }
 
-#[macro_export]
 macro_rules! impl_byte_repr_multi_byte_primitives {
     ($ty:ty, $len:literal) => {
         impl ByteRepr for $ty {
@@ -163,21 +162,21 @@ macro_rules! impl_byte_repr_multi_byte_primitives {
     };
 }
 
-crate::impl_byte_repr_multi_byte_primitives!(u16, 2);
-crate::impl_byte_repr_multi_byte_primitives!(i16, 2);
-crate::impl_byte_repr_multi_byte_primitives!(u32, 4);
-crate::impl_byte_repr_multi_byte_primitives!(i32, 4);
-crate::impl_byte_repr_multi_byte_primitives!(f32, 4);
-crate::impl_byte_repr_multi_byte_primitives!(u64, 8);
-crate::impl_byte_repr_multi_byte_primitives!(i64, 8);
-crate::impl_byte_repr_multi_byte_primitives!(f64, 8);
+impl_byte_repr_multi_byte_primitives!(u16, 2);
+impl_byte_repr_multi_byte_primitives!(i16, 2);
+impl_byte_repr_multi_byte_primitives!(u32, 4);
+impl_byte_repr_multi_byte_primitives!(i32, 4);
+impl_byte_repr_multi_byte_primitives!(f32, 4);
+impl_byte_repr_multi_byte_primitives!(u64, 8);
+impl_byte_repr_multi_byte_primitives!(i64, 8);
+impl_byte_repr_multi_byte_primitives!(f64, 8);
 #[cfg(target_pointer_width = "32")]
-crate::impl_byte_repr_multi_byte_primitives!(usize, 4);
+impl_byte_repr_multi_byte_primitives!(usize, 4);
 #[cfg(target_pointer_width = "32")]
-crate::impl_byte_repr_multi_byte_primitives!(isize, 4);
+impl_byte_repr_multi_byte_primitives!(isize, 4);
 #[cfg(target_pointer_width = "64")]
-crate::impl_byte_repr_multi_byte_primitives!(usize, 8);
+impl_byte_repr_multi_byte_primitives!(usize, 8);
 #[cfg(target_pointer_width = "64")]
-crate::impl_byte_repr_multi_byte_primitives!(isize, 8);
-crate::impl_byte_repr_multi_byte_primitives!(u128, 16);
-crate::impl_byte_repr_multi_byte_primitives!(i128, 16);
+impl_byte_repr_multi_byte_primitives!(isize, 8);
+impl_byte_repr_multi_byte_primitives!(u128, 16);
+impl_byte_repr_multi_byte_primitives!(i128, 16);

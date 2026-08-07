@@ -7,11 +7,37 @@ use std::{
 use crate::{communicator::UdpCommunicatorMut, prelude::*};
 
 pub trait MultiCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
+    /// Receive all new packets. If no "connection" exists for the [`SocketAddr`] a new packet was
+    /// received from, one will be created.
+    /// For each packet that was received, the provided `on_recv` callback will be called, giving
+    /// you access to the connection that the packet was received from. You can read all received
+    /// messages from that packet using [`UdpCommunicatorMut::read`] or
+    /// [`UdpCommunicatorMut::read_ordered`] and queue responses using
+    /// [`UdpCommunicatorMut::write*`](UdpCommunicatorMut).
+    ///
+    /// **Example:**
+    /// ```
+    /// use mini_udp::prelude::*;
+    ///
+    /// let mut multi = MultiUdpCommunicator::<(), u8>::bind("0.0.0.0:7000");
+    /// let mut com = UdpCommunicator::<u8, ()>::default().connect("0.0.0.0:7000").unwrap();
+    /// com.write(200);
+    /// com.send().unwrap();
+    /// let mut received_response = false;
+    /// multi.recv(|mut com: UdpCommunicatorMut<_, _>| {
+    ///     if let Some(msg) = com.read() && msg == 200 {
+    ///         received_response = true;
+    ///     }
+    /// });
+    /// assert!(received_response);
+    /// ```
     fn recv<M, CB>(&mut self, on_recv: CB)
     where
         CB: OnReceiveCallback<M, SEND, RECV>;
     fn send(&mut self);
-    /// Sadly not a real [Iterator]
+    /// Iterate over all client connections. A client connection is automatically created when
+    /// [`recv`](Self::recv) reads a packet from a [`SocketAddr`] that does not already have a
+    /// connection. Connections are never automatically deleted by [`mini_udp`].
     fn iter_mut(&mut self) -> IterMut<'_, SEND, RECV>;
     fn broadcast(&mut self, message: SEND)
     where
@@ -80,7 +106,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     where
         CB: OnReceiveCallback<M, SEND, RECV>,
     {
-        let mut state = CB::prepare();
+        let mut state = on_recv.prepare();
         while let Ok((n, addr)) = self.socket.socket.recv_from(&mut self.socket.data_buffer) {
             #[cfg(debug_assertions)]
             if self.socket.delay_packet(Some(addr), n) {
@@ -90,7 +116,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
             com.read_packet(n, &mut self.socket);
             on_recv.on_recv(
                 UdpCommunicatorMut {
-                    socket: &mut self.socket,
+                    socket: &self.socket,
                     addr,
                     inner: com,
                 },
@@ -103,26 +129,19 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
             com.read_packet(n, &mut self.socket);
             on_recv.on_recv(
                 UdpCommunicatorMut {
-                    socket: &mut self.socket,
+                    socket: &self.socket,
                     addr,
                     inner: com,
                 },
                 &mut state,
             );
         }
-        CB::finish(self, state);
+        on_recv.finish(self, state);
     }
 
     fn send(&mut self) {
         for (addr, inner) in &mut self.coms {
-            if let Err(e) = {
-                UdpCommunicatorMut {
-                    socket: &mut self.socket,
-                    addr: *addr,
-                    inner,
-                }
-                .tick()
-            } {
+            if let Err(e) = inner.send(*addr, &mut self.socket) {
                 warn!("Failed to send Communicator of {addr:?}: {e}");
             }
         }
@@ -130,7 +149,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
 
     fn iter_mut(&mut self) -> IterMut<'_, SEND, RECV> {
         IterMut {
-            socket: &mut self.socket,
+            socket: &self.socket,
             inner: self.coms.iter_mut(),
         }
     }
@@ -160,7 +179,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     {
         for (addr, com) in self.coms.iter_mut() {
             f(UdpCommunicatorMut {
-                socket: &mut self.socket,
+                socket: &self.socket,
                 addr: *addr,
                 inner: com,
             });
@@ -173,7 +192,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     {
         self.coms.retain(|addr, inner| {
             filter(UdpCommunicatorMut {
-                socket: &mut self.socket,
+                socket: &self.socket,
                 addr: *addr,
                 inner,
             })
@@ -190,20 +209,20 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
         SEND: Debug + Clone,
         RECV: Debug,
     {
-        let mut state = CB::prepare();
+        let mut state = on_recv.prepare();
         while let Ok((n, addr)) = self.socket.socket.recv_from(&mut self.socket.data_buffer) {
             let com = self.coms.entry(addr).or_default();
             com.read_packet(n, &mut self.socket);
             on_recv.on_recv(
                 UdpCommunicatorMut {
-                    socket: &mut self.socket,
+                    socket: &self.socket,
                     addr,
                     inner: com,
                 },
                 &mut state,
             );
         }
-        CB::finish(self, state);
+        on_recv.finish(self, state);
 
         self.send();
     }
@@ -214,7 +233,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     ) -> Option<UdpCommunicatorMut<'a, SEND, RECV>> {
         let inner = self.coms.get_mut(client)?;
         Some(UdpCommunicatorMut {
-            socket: &mut self.socket,
+            socket: &self.socket,
             addr: *client,
             inner,
         })
@@ -227,10 +246,14 @@ where
     RECV: ByteRepr,
 {
     type State;
-    fn prepare() -> Self::State;
+    /// Will be called at the beginning of each [`MultiCommunicator::recv`] invocation.
+    fn prepare(&mut self) -> Self::State;
+    /// Will be called for each packet that has been received during a [`MultiCommunicator::recv`]
+    /// invocation.
     fn on_recv(&mut self, com: UdpCommunicatorMut<SEND, RECV>, state: &mut Self::State);
     #[allow(unused_variables)]
-    fn finish(com: &mut MultiUdpCommunicator<SEND, RECV>, state: Self::State) {}
+    /// Will be called at the end of each [`MultiCommunicator::recv`] invocation.
+    fn finish(&mut self, com: &mut MultiUdpCommunicator<SEND, RECV>, state: Self::State) {}
 }
 
 impl<T, SEND, RECV> OnReceiveCallback<UdpCommunicatorMut<'_, SEND, RECV>, SEND, RECV> for T
@@ -240,7 +263,7 @@ where
     RECV: ByteRepr,
 {
     type State = ();
-    fn prepare() -> Self::State {}
+    fn prepare(&mut self) -> Self::State {}
     fn on_recv(&mut self, com: UdpCommunicatorMut<SEND, RECV>, _state: &mut Self::State) {
         self(com);
     }
@@ -261,13 +284,13 @@ where
     RECV: ByteRepr + Debug,
 {
     type State = Vec<SEND>;
-    fn prepare() -> Self::State {
+    fn prepare(&mut self) -> Self::State {
         vec![]
     }
     fn on_recv(&mut self, com: UdpCommunicatorMut<SEND, RECV>, state: &mut Self::State) {
         self(com, DelayedBroadcast { broadcast: state });
     }
-    fn finish(com: &mut MultiUdpCommunicator<SEND, RECV>, state: Self::State) {
+    fn finish(&mut self, com: &mut MultiUdpCommunicator<SEND, RECV>, state: Self::State) {
         for message in state {
             com.broadcast(message);
         }
@@ -289,13 +312,13 @@ where
     RECV: ByteRepr + Debug,
 {
     type State = Vec<(SocketAddr, SEND)>;
-    fn prepare() -> Self::State {
+    fn prepare(&mut self) -> Self::State {
         vec![]
     }
     fn on_recv(&mut self, com: UdpCommunicatorMut<SEND, RECV>, state: &mut Self::State) {
         self(com, DelayedBroadcastExcept { broadcast: state });
     }
-    fn finish(com: &mut MultiUdpCommunicator<SEND, RECV>, state: Self::State) {
+    fn finish(&mut self, com: &mut MultiUdpCommunicator<SEND, RECV>, state: Self::State) {
         for (exception, message) in state {
             com.broadcast_except(message, exception);
         }
@@ -317,13 +340,13 @@ where
     RECV: ByteRepr + Debug,
 {
     type State = Vec<DelayedForEachF<SEND, RECV>>;
-    fn prepare() -> Self::State {
+    fn prepare(&mut self) -> Self::State {
         vec![]
     }
     fn on_recv(&mut self, com: UdpCommunicatorMut<SEND, RECV>, state: &mut Self::State) {
         self(com, DelayedForEach { for_each: state });
     }
-    fn finish(com: &mut MultiUdpCommunicator<SEND, RECV>, state: Self::State) {
+    fn finish(&mut self, com: &mut MultiUdpCommunicator<SEND, RECV>, state: Self::State) {
         for f in state {
             com.for_each(f);
         }
@@ -369,23 +392,22 @@ where
     }
 }
 
-/// Sadly can't be a real [Iterator]
 pub struct IterMut<'a, SEND, RECV>
 where
     SEND: ByteRepr,
     RECV: ByteRepr,
 {
-    socket: &'a mut UdpCommunicatorSocket,
+    socket: &'a UdpCommunicatorSocket,
     inner: std::collections::hash_map::IterMut<'a, SocketAddr, InnerUdpCommunicator<SEND, RECV>>,
 }
 
-impl<'a, SEND, RECV> IterMut<'a, SEND, RECV>
+impl<'a, SEND, RECV> Iterator for IterMut<'a, SEND, RECV>
 where
     SEND: ByteRepr,
     RECV: ByteRepr,
 {
-    #[allow(clippy::should_implement_trait)]
-    pub fn next<'b>(&'b mut self) -> Option<UdpCommunicatorMut<'b, SEND, RECV>> {
+    type Item = UdpCommunicatorMut<'a, SEND, RECV>;
+    fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|(addr, inner)| UdpCommunicatorMut {
             socket: self.socket,
             addr: *addr,
@@ -417,5 +439,38 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiUdpCommunicator<SEND, RECV> {
     pub fn with_debug_logs(mut self) -> Self {
         self.socket = self.socket.with_debug_logs();
         self
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::prelude::*;
+
+    #[test]
+    fn multi_udp_communicator_iter_mut() {
+        let mut multi = MultiUdpCommunicator::<(), ()>::bind("0.0.0.0:7400");
+        let mut com1 = UdpCommunicator::<(), ()>::bind("0.0.0.0:7401")
+            .connect("0.0.0.0:7400")
+            .unwrap();
+        let mut com2 = UdpCommunicator::<(), ()>::bind("0.0.0.0:7402")
+            .connect("0.0.0.0:7400")
+            .unwrap();
+        let mut com3 = UdpCommunicator::<(), ()>::bind("0.0.0.0:7403")
+            .connect("0.0.0.0:7400")
+            .unwrap();
+        com1.write_heartbeat();
+        com2.write_heartbeat();
+        com3.write_heartbeat();
+        com1.send().unwrap();
+        com2.send().unwrap();
+        com3.send().unwrap();
+        multi.recv(|_com: UdpCommunicatorMut<_, _>| {});
+        let mut ports = vec![7401, 7402, 7403];
+        for com in multi.iter_mut() {
+            let port = com.addr.port();
+            let i = ports.iter().position(|p| *p == port).unwrap();
+            ports.remove(i);
+        }
+        assert!(ports.is_empty());
     }
 }

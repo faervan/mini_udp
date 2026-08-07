@@ -37,8 +37,6 @@ pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
     fn write_heartbeat(&mut self);
     fn read(&mut self) -> Option<RECV>;
     fn read_ordered(&mut self) -> Option<RECV>;
-    fn send(&mut self) -> Result<(), ByteReprError>;
-    fn tick(&mut self) -> Result<(), ByteReprError>;
     /// Returns `true` if there are any pending messages to be send / packets to get acknowledged.
     fn has_work(&self) -> bool;
     /// Returns the [Instant] of time at which the last packet has been received.
@@ -77,7 +75,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for UdpCommunicator<SEND
 }
 
 pub struct UdpCommunicatorMut<'a, SEND: ByteRepr, RECV: ByteRepr> {
-    socket: &'a mut UdpCommunicatorSocket,
+    socket: &'a UdpCommunicatorSocket,
     pub addr: SocketAddr,
     inner: &'a mut InnerUdpCommunicator<SEND, RECV>,
 }
@@ -123,25 +121,6 @@ impl<SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV> for UdpCommunicato
     #[inline(always)]
     fn read_ordered(&mut self) -> Option<RECV> {
         self.inner.ordered_recv_queue.pop_front()
-    }
-
-    #[inline(always)]
-    fn send(&mut self) -> Result<(), ByteReprError>
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
-        self.inner.send((), &mut self.socket)
-    }
-
-    #[inline(always)]
-    fn tick(&mut self) -> Result<(), ByteReprError>
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
-        self.recv();
-        self.send()
     }
 
     #[inline(always)]
@@ -197,24 +176,6 @@ impl<'a, SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV>
     }
 
     #[inline(always)]
-    fn send(&mut self) -> Result<(), ByteReprError>
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
-        self.inner.send(self.addr, self.socket)
-    }
-
-    #[inline(always)]
-    fn tick(&mut self) -> Result<(), ByteReprError>
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
-        self.send()
-    }
-
-    #[inline(always)]
     fn has_work(&self) -> bool {
         self.inner.has_work()
     }
@@ -244,6 +205,26 @@ impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
         RECV: Debug,
     {
         self.inner.receive(&mut self.socket);
+    }
+
+    #[inline(always)]
+    pub fn send(&mut self) -> Result<(), ByteReprError>
+    where
+        SEND: Debug,
+        RECV: Debug,
+    {
+        self.inner.send((), &mut self.socket)
+    }
+
+    #[inline(always)]
+    /// A shorthand for [`self.recv()`](Self::recv) followed by [`self.send()`](Self::send)
+    pub fn tick(&mut self) -> Result<(), ByteReprError>
+    where
+        SEND: Debug,
+        RECV: Debug,
+    {
+        self.recv();
+        self.send()
     }
 
     #[cfg(debug_assertions)]
