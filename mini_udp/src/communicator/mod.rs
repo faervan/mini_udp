@@ -37,16 +37,8 @@ pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
     fn write_heartbeat(&mut self);
     fn read(&mut self) -> Option<RECV>;
     fn read_ordered(&mut self) -> Option<RECV>;
-    /// TODO! Remove where Debug
-    fn send(&mut self) -> Result<(), ByteReprError>
-    where
-        SEND: Debug,
-        RECV: Debug;
-    /// TODO! Remove where Debug
-    fn tick(&mut self) -> Result<(), ByteReprError>
-    where
-        SEND: Debug,
-        RECV: Debug;
+    fn send(&mut self) -> Result<(), ByteReprError>;
+    fn tick(&mut self) -> Result<(), ByteReprError>;
     /// Returns `true` if there are any pending messages to be send / packets to get acknowledged.
     fn has_work(&self) -> bool;
     /// Returns the [Instant] of time at which the last packet has been received.

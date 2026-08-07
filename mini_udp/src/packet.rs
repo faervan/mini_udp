@@ -15,9 +15,7 @@ pub(super) const MAX_PACKET_LEN: usize = PACKET_HEADER_LEN + MAX_PACKET_DATA_LEN
 #[cfg_attr(test, derive(PartialEq))]
 pub struct Packet<M: ByteRepr> {
     pub(super) ack: PacketAck,
-    /// TODO!
     pub(super) reliable: bool,
-    /// TODO!
     pub(super) ordered: bool,
     /// If `messages.is_empty()`, then this was send as a heartbeat packet
     pub(super) messages: Vec<M>,

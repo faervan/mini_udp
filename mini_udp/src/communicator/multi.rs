@@ -73,8 +73,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for MultiUdpCommunicator
     }
 }
 
-/// TODO: Remove where Debug
-impl<SEND: ByteRepr + Debug, RECV: ByteRepr + Debug> MultiCommunicator<SEND, RECV>
+impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     for MultiUdpCommunicator<SEND, RECV>
 {
     fn recv<M, CB>(&mut self, mut on_recv: CB)

@@ -1,4 +1,4 @@
-use std::array::TryFromSliceError;
+use std::{array::TryFromSliceError, fmt::Debug};
 
 use thiserror::Error;
 
@@ -6,7 +6,8 @@ pub trait StaticByteRepr {
     const BYTE_LEN: usize;
 }
 
-pub trait ByteRepr: Sized {
+// TODO! maybe remove the Debug bound in the future
+pub trait ByteRepr: Debug + Sized {
     const MIN_BYTE_LEN: usize;
     const MAX_BYTE_LEN: usize;
     fn byte_len(&self) -> usize;

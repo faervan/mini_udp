@@ -18,25 +18,25 @@ mod test {
 
     #[test]
     fn min_max_length_derive() {
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         struct AA {}
         assert_eq!(AA::MIN_BYTE_LEN, 0);
         assert_eq!(AA::MAX_BYTE_LEN, 0);
         assert_eq!(AA {}.byte_len(), 0);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         struct AB();
         assert_eq!(AB::MIN_BYTE_LEN, 0);
         assert_eq!(AB::MAX_BYTE_LEN, 0);
         assert_eq!(AB().byte_len(), 0);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         struct AC;
         assert_eq!(AC::MIN_BYTE_LEN, 0);
         assert_eq!(AC::MAX_BYTE_LEN, 0);
         assert_eq!(AC.byte_len(), 0);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         enum AD {
             A,
         }
@@ -44,7 +44,7 @@ mod test {
         assert_eq!(AD::MAX_BYTE_LEN, 0);
         assert_eq!(AD::A.byte_len(), 0);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         struct BA {
             n: u8,
         }
@@ -56,7 +56,7 @@ mod test {
         assert_eq!(BA { n: 127 }.byte_len(), 1);
         assert_eq!(BA { n: 255 }.byte_len(), 1);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         struct BB(u8);
         assert_eq!(BB::MIN_BYTE_LEN, 1);
         assert_eq!(BB::MAX_BYTE_LEN, 1);
@@ -66,7 +66,7 @@ mod test {
         assert_eq!(BB(128).byte_len(), 1);
         assert_eq!(BB(255).byte_len(), 1);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         enum BC {
             A(u8),
         }
@@ -78,7 +78,7 @@ mod test {
         assert_eq!(BC::A(99).byte_len(), 1);
         assert_eq!(BC::A(255).byte_len(), 1);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         struct CA {
             named: f32,
             unnamed: bool,
@@ -132,7 +132,7 @@ mod test {
             21
         );
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         struct CB(i64, i8);
         assert_eq!(CB::MIN_BYTE_LEN, 9);
         assert_eq!(CB::MAX_BYTE_LEN, 9);
@@ -142,7 +142,7 @@ mod test {
         assert_eq!(CB(i64::MIN, i8::MIN).byte_len(), 9);
         assert_eq!(CB(i64::MAX, i8::MAX).byte_len(), 9);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         enum CC {
             A { x: u32 },
             B(bool, u16),
@@ -156,7 +156,7 @@ mod test {
         assert_eq!(CC::B(true, u16::MAX).byte_len(), 4);
         assert_eq!(CC::C(i128::MIN).byte_len(), 17);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         struct DA(CC);
         assert_eq!(DA::MIN_BYTE_LEN, 4);
         assert_eq!(DA::MAX_BYTE_LEN, 17);
@@ -166,7 +166,7 @@ mod test {
         assert_eq!(DA(CC::C(0)).byte_len(), 17);
         assert_eq!(DA(CC::C(i128::MAX)).byte_len(), 17);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         struct DB {
             a: bool,
             b: i32,
@@ -220,7 +220,7 @@ mod test {
             22
         );
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         enum DC {
             A,
             B(u16),
@@ -240,7 +240,7 @@ mod test {
             10
         );
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         enum DD {
             B(u64, bool, u8),
             C { nested: CB },
@@ -260,7 +260,7 @@ mod test {
         assert_eq!(DD::BC(BC::A(0), 0).byte_len(), 3);
         assert_eq!(DD::BC(BC::A(255), i8::MIN).byte_len(), 3);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         enum DE {
             X(bool, BA, u16),
             Y { fixed: DB, x: u8 },
@@ -296,7 +296,7 @@ mod test {
         );
         assert_eq!(DE::Z(true, -48).byte_len(), 3);
 
-        #[derive(ByteRepr)]
+        #[derive(ByteRepr, Debug)]
         enum DF {
             X(bool, BA, u16),
             Y { fixed: DB, x: u8 },

@@ -58,15 +58,12 @@ impl<SEND: ByteRepr, RECV: ByteRepr> Default for InnerUdpCommunicator<SEND, RECV
 }
 
 impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
-    /// TODO! Remove where Debug
     pub fn send<Addr>(
         &mut self,
         addr: Addr,
         socket: &mut UdpCommunicatorSocket,
     ) -> Result<(), ByteReprError>
     where
-        SEND: Debug,
-        RECV: Debug,
         Addr: SocketSendAddr,
     {
         if self.received_packet_duplicate
@@ -99,12 +96,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         self.send_packets(addr, socket)
     }
 
-    /// TODO! Remove where Debug
-    pub fn receive(&mut self, socket: &mut UdpCommunicatorSocket)
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
+    pub fn receive(&mut self, socket: &mut UdpCommunicatorSocket) {
         while let Ok(n) = socket.socket.recv(&mut socket.data_buffer) {
             #[cfg(debug_assertions)]
             if socket.delay_packet(None, n) {
@@ -118,12 +110,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         }
     }
 
-    /// TODO! Remove where Debug
-    pub fn read_packet(&mut self, n: usize, socket: &mut UdpCommunicatorSocket)
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
+    pub fn read_packet(&mut self, n: usize, socket: &mut UdpCommunicatorSocket) {
         #[cfg(debug_assertions)]
         let packet = Packet::<RECV>::from_bytes(&socket.data_buffer[4..n])
             .unwrap()
@@ -257,12 +244,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         self.unreliable_send_packets.push_back(packet);
     }
 
-    /// TODO! Remove where Debug
-    fn flush_messages(&mut self, #[cfg(debug_assertions)] socket: &UdpCommunicatorSocket)
-    where
-        SEND: Debug,
-        RECV: Debug,
-    {
+    fn flush_messages(&mut self, #[cfg(debug_assertions)] socket: &UdpCommunicatorSocket) {
         flush_messages(
             #[cfg(debug_assertions)]
             socket,
@@ -324,15 +306,12 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         }
     }
 
-    /// TODO! Remove where Debug
     fn send_packets<Addr>(
         &mut self,
         addr: Addr,
         socket: &mut UdpCommunicatorSocket,
     ) -> Result<(), ByteReprError>
     where
-        SEND: Debug,
-        RECV: Debug,
         Addr: SocketSendAddr,
     {
         let mut any_send = false;
@@ -412,8 +391,8 @@ fn flush_messages<SEND: ByteRepr + Debug, RECV: ByteRepr>(
                 available_bytes -= msg.byte_len();
                 included_msgs += 1;
             } else {
-                // TODO! Maybe include other messages here that are small enough, but that
-                // would make message ordering arbitrary
+                // TODO! Include other messages here that are small enough, if the packet is not
+                // ordered.
                 break;
             }
         }
