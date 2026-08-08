@@ -140,6 +140,35 @@ impl ByteRepr for i8 {
     }
 }
 
+impl ByteRepr for String {
+    const MIN_BYTE_LEN: usize = 4;
+    const MAX_BYTE_LEN: usize = 1024;
+    fn byte_len(&self) -> usize {
+        4 + self.len()
+    }
+    fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), ByteReprError> {
+        bytes
+            .get_mut(..4)
+            .ok_or(ByteReprError::SliceTooShort)?
+            .copy_from_slice(&(self.len() as u32).to_le_bytes());
+        bytes
+            .get_mut(4..4 + self.len())
+            .ok_or(ByteReprError::SliceTooShort)?
+            .copy_from_slice(self.as_bytes());
+        Ok(())
+    }
+    fn from_bytes(bytes: &[u8]) -> Result<Self, ByteReprError> {
+        let len = u32::from_le_bytes(
+            TryInto::<[u8; 4]>::try_into(bytes.get(..4).ok_or(ByteReprError::SliceTooShort)?)
+                .map_err(|_| ByteReprError::SliceTooShort)?,
+        ) as usize;
+        Ok(
+            Self::from_utf8_lossy(bytes.get(4..4 + len).ok_or(ByteReprError::SliceTooShort)?)
+                .into_owned(),
+        )
+    }
+}
+
 macro_rules! impl_byte_repr_multi_byte_primitives {
     ($ty:ty, $len:literal) => {
         impl ByteRepr for $ty {

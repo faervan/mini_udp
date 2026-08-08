@@ -64,7 +64,7 @@ impl Field {
             let ident = syn::Ident::from(&self.ident);
             let ty = self.value.name();
             quote! {let #ident = <#ty>::from_le_bytes(#bytes);}
-        } else if let Value::Vec { .. } = &self.value {
+        } else if let Value::String { .. } | Value::Vec { .. } = &self.value {
             let ident = self.fixed_ident();
             let ty = quote! {u32};
             quote! {let #ident = <#ty>::from_le_bytes(#bytes) as usize;}
@@ -84,6 +84,21 @@ impl Field {
                 quote! {
                     let #ident = <#ty>::from_bytes(&bytes[byte_ptr..])?;
                     byte_ptr += #ident.byte_len();
+                }
+            }
+            Value::String { .. } => {
+                quote! {
+                    let #ident = String::from_utf8_lossy(
+                        &bytes[byte_ptr..byte_ptr + #fixed_ident]
+                    ).into_owned();
+                }
+            }
+            Value::Cow { ty } => {
+                quote! {
+                    let mut #ident = std::borrow::Cow::Owned(
+                        #ty::from_bytes(&bytes[byte_ptr..])?
+                    );
+                    byte_ptr += std::borrow::Borrow::<#ty>::borrow(&#ident).byte_len();
                 }
             }
             Value::Array { ty, length } => {
@@ -141,8 +156,10 @@ impl Field {
         let thing = match length.is_static() {
             true => ident.to_token_stream(),
             false => match self.value {
-                Value::Vec { .. } => quote! {(#ident.len() as u32)},
-                Value::Array { .. } | Value::Delegated { .. } => return quote! {},
+                Value::String { .. } | Value::Vec { .. } => quote! {(#ident.len() as u32)},
+                Value::Array { .. } | Value::Cow { .. } | Value::Delegated { .. } => {
+                    return quote! {};
+                }
                 _ => unreachable!(),
             },
         };
@@ -162,6 +179,21 @@ impl Field {
                 quote! {
                     #ident.write_to_bytes(&mut bytes[byte_ptr..])?;
                     byte_ptr += #ident.byte_len();
+                }
+            }
+            Value::String { .. } => {
+                quote! {
+                    bytes.get_mut(byte_ptr..byte_ptr + #ident.len())
+                        .ok_or(::mini_udp::ByteReprError::SliceTooShort)?
+                        .copy_from_slice(#ident.as_bytes());
+                    byte_ptr += #ident.len();
+                }
+            }
+            Value::Cow { ty } => {
+                let length = ty.length(ident.to_token_stream()).as_length();
+                quote! {
+                    #ident.write_to_bytes(&mut bytes[byte_ptr..])?;
+                    byte_ptr += #length;
                 }
             }
             Value::Array { .. } => {
@@ -245,6 +277,24 @@ pub enum Value {
     #[assoc(name = quote! {i128}, length = ByteLen::fully_static(16))]
     I128,
     #[assoc(
+        name = quote! {String},
+        length = ByteLen::known_fixed_unknown_length(
+            4,
+            quote! {#_max_length},
+            quote! {#field.len()}
+        )
+    )]
+    String { max_length: usize },
+    #[assoc(
+        name = quote! {Cow<#_ty>}.to_token_stream(),
+        length = ByteLen::fully_unknown(
+            quote! {<#_ty>::MIN_BYTE_LEN},
+            quote! {<#_ty>::MAX_BYTE_LEN},
+            quote! {#field.byte_len()},
+        )
+    )]
+    Cow { ty: Box<Self> },
+    #[assoc(
         name = quote! {[#_ty; #_length]}.to_token_stream(),
         length = ByteLen::fully_unknown(
             quote! {<#_ty>::MIN_BYTE_LEN * #_length},
@@ -297,29 +347,42 @@ impl Value {
                         "isize" => Self::ISize,
                         "u128" => Self::U128,
                         "i128" => Self::I128,
+                        "str" | "String" => Self::String { max_length: 1020 },
                         _ => Self::Delegated {
                             ty: Box::new(ty.clone()),
                         },
                     };
                 }
-                None => match path.path.segments.last() {
-                    Some(syn::PathSegment {
+                None => {
+                    if let Some(syn::PathSegment {
                         ident,
                         arguments:
                             syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
                                 args,
                                 ..
                             }),
-                    }) if ident == "Vec" => {
-                        if let Some(syn::GenericArgument::Type(t)) = args.last() {
-                            return Self::Vec {
-                                ty: Box::new(Self::from_type(t)),
-                                max_length: 1000,
-                            };
+                    }) = path.path.segments.last()
+                    {
+                        match ident.to_string().as_str() {
+                            "Vec" => {
+                                if let Some(syn::GenericArgument::Type(t)) = args.last() {
+                                    return Self::Vec {
+                                        ty: Box::new(Self::from_type(t)),
+                                        max_length: 1000,
+                                    };
+                                }
+                            }
+                            "Cow" => {
+                                if let Some(syn::GenericArgument::Type(t)) = args.last() {
+                                    return Self::Cow {
+                                        ty: Box::new(Self::from_type(t)),
+                                    };
+                                }
+                            }
+                            _ => {}
                         }
                     }
-                    _ => (),
-                },
+                }
             },
             syn::Type::Array(syn::TypeArray { elem, len, .. }) => {
                 return Self::Array {

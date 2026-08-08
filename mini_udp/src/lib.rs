@@ -70,6 +70,8 @@ pub use tracing;
 
 #[cfg(test)]
 mod test {
+    use std::borrow::Cow;
+
     use crate::prelude::*;
 
     #[test]
@@ -560,6 +562,23 @@ mod test {
                 b: [B(usize::MAX); 240]
             }
         );
+    }
+
+    #[test]
+    fn string() {
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct A(String);
+
+        crate::test_bitrepr_roundtrip!(a, A, A(String::from("Hello world!")));
+    }
+
+    #[test]
+    fn cow() {
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct A<'a>(Cow<'a, String>);
+
+        let s = String::from("What a beautiful day");
+        crate::test_bitrepr_roundtrip!(a, A, A(Cow::Borrowed(&s)));
     }
 
     #[macro_export]
