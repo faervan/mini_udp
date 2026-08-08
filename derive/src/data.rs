@@ -103,16 +103,25 @@ impl Field {
             }
             Value::Array { ty, length } => {
                 quote! {
-                    let mut #ident = (0..#length)
-                        .map(|n| {
-                            let item = <#ty>::from_bytes(&bytes[byte_ptr..])?;
-                            byte_ptr += item.byte_len();
-                            Ok(item)
-                        })
-                        // TODO! This heap allocation is unnecessary
-                        .collect::<Result<Vec<_>, ::mini_udp::ByteReprError>>()?
-                        .try_into()
-                        .unwrap();
+                    let mut err = Ok(());
+                    let #ident: [#ty; #length] = std::array::from_fn(|_| {
+                        if err.is_err() {
+                            // Default will not be necessary if
+                            // <https://doc.rust-lang.org/std/array/fn.try_from_fn.html> hits stable
+                            return #ty::default();
+                        }
+                        match <#ty>::from_bytes(&bytes[byte_ptr..]) {
+                            Ok(item) => {
+                                byte_ptr += item.byte_len();
+                                item
+                            }
+                            Err(e) => {
+                                err = Err(e);
+                                #ty::default()
+                            }
+                        }
+                    });
+                    let _ = err?;
                 }
             }
             Value::Vec { ty, .. } => {

@@ -539,7 +539,7 @@ mod test {
         struct A {
             list: [f32; 3],
         }
-        #[derive(ByteRepr, PartialEq, Debug, Clone, Copy)]
+        #[derive(ByteRepr, PartialEq, Debug, Default, Clone, Copy)]
         struct B(usize);
         #[derive(ByteRepr, PartialEq, Debug)]
         struct C {
