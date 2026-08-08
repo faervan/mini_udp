@@ -52,6 +52,26 @@ pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
     fn last_send(&self) -> &Instant;
 }
 
+/// A wrapper around [`std::net::UdpSocket`] that will handle message (de)serialization,
+/// reliability, and ordering when connected to another [`UdpCommunicator`] or
+/// [`MultiUdpCommunicator`].
+///
+/// **Example**
+/// ```rust
+/// use mini_udp::prelude::*;
+/// use std::borrow::Cow;
+///
+/// #[derive(ByteRepr, Debug, PartialEq)]
+/// struct Message<'a>(Cow<'a, String>);
+///
+/// let mut com1 = UdpCommunicator::<_, ()>::bind("0.0.0.0:7002").connect("0.0.0.0:7003").unwrap();
+/// let mut com2 = UdpCommunicator::<(), _>::bind("0.0.0.0:7003").connect("0.0.0.0:7002").unwrap();
+/// let message = String::from("hello udp");
+/// com1.write(Message(Cow::Borrowed(&message)));
+/// com1.send().unwrap();
+/// com2.recv();
+/// assert_eq!(com2.read(), Some(Message(Cow::Owned(message))));
+/// ```
 pub struct UdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     socket: UdpCommunicatorSocket,
     pub(super) inner: InnerUdpCommunicator<SEND, RECV>,

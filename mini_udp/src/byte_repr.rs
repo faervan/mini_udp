@@ -7,12 +7,33 @@ pub trait StaticByteRepr {
 }
 
 // TODO! maybe remove the Debug bound in the future
+/// You may use the [derive macro](macro@crate::prelude::ByteRepr) to implement this trait.
+///
+/// **Example**
+/// ```rust
+/// use mini_udp::prelude::*;
+///
+/// #[derive(ByteRepr, PartialEq, Debug)]
+/// struct A {
+///     list: [f32; 3],
+/// }
+/// assert_eq!(A::MIN_BYTE_LEN, 12);
+/// assert_eq!(A::MAX_BYTE_LEN, 12);
+///
+/// let a = A { list: [1397.201, -0.0, -4010401.32914] };
+/// assert_eq!(a.byte_len(), A::MIN_BYTE_LEN);
+///
+/// let mut buf = [0; A::MAX_BYTE_LEN];
+/// assert!(a.write_to_bytes(&mut buf).is_ok());
+/// assert_eq!(A::from_bytes(&buf).unwrap(), a);
+/// ```
 pub trait ByteRepr: Debug + Sized {
     const MIN_BYTE_LEN: usize;
     const MAX_BYTE_LEN: usize;
     fn byte_len(&self) -> usize;
     /// The number of bytes written on success is equal to `self.byte_len()`
     fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), ByteReprError>;
+    /// The number of bytes read on success is equal to `self.byte_len()`
     fn from_bytes(bytes: &[u8]) -> Result<Self, ByteReprError>;
 }
 

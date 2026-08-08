@@ -19,7 +19,7 @@ pub trait MultiCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     /// [`UdpCommunicatorMut::read_ordered`] and queue responses using
     /// [`UdpCommunicatorMut::write*`](UdpCommunicatorMut).
     ///
-    /// **Example:**
+    /// **Example**
     /// ```
     /// use mini_udp::prelude::*;
     ///

@@ -3,6 +3,13 @@
 //! This was inspired by Glenn Fiedler, who wrote an amazing set of articles about this:
 //! <https://gafferongames.com/categories/building-a-game-network-protocol/>
 //!
+//! The main entry points of this crate are [`UdpCommunicator`](communicator::UdpCommunicator)
+//! and [`MultiUdpCommunicator`](communicator::MultiUdpCommunicator), which both wrap
+//! [`std::net::UdpSocket`].
+//!
+//! All messages are (de)serialized by the in-house [`ByteRepr`] trait, which has a derive macro as well:
+//! [`ByteRepr`](macro@prelude::ByteRepr).
+//!
 //! ```rust
 //! use mini_udp::prelude::*;
 //!
