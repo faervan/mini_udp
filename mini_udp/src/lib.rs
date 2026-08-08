@@ -60,7 +60,7 @@ mod byte_repr;
 pub use byte_repr::{ByteRepr, ByteReprError};
 
 pub mod communicator;
-mod packet;
+pub mod packet;
 mod packet_ack;
 pub mod prelude;
 pub mod ring_buffer;

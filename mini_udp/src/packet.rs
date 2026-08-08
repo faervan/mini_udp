@@ -2,18 +2,18 @@ use crate::prelude::*;
 
 /// The maximum allowed length of the data part of a UDP packet.
 /// The total maximum length is computed by adding the header length as well.
-pub(super) const MAX_PACKET_DATA_LEN: usize = 1024;
-/// 4 bytes for the CRC, then the [`PacketAck`], then 1 byte extra metadata (reliable, ordered),
+pub const MAX_PACKET_DATA_LEN: usize = 1024;
+/// 4 bytes for the CRC, then the `PacketAck`, then 1 byte extra metadata (reliable, ordered),
 ///   finally 4 bytes for the amount of messages in the packet (this is not necessary as it can be
 ///   infered from the UDP packet length, but the [`ByteRepr`] derive currently always includes it).
 /// Currently 2 byte extra because booleans do not get combined yet! (TODO!)
-pub(super) const PACKET_HEADER_LEN: usize = 4 + PacketAck::BYTE_LEN + 2 + 4;
+pub const PACKET_HEADER_LEN: usize = 4 + PacketAck::BYTE_LEN + 2 + 4;
 /// The maximum allowed length of a UDP packet.
-pub(super) const MAX_PACKET_LEN: usize = PACKET_HEADER_LEN + MAX_PACKET_DATA_LEN;
+pub const MAX_PACKET_LEN: usize = PACKET_HEADER_LEN + MAX_PACKET_DATA_LEN;
 
 #[derive(ByteRepr, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
-pub struct Packet<M: ByteRepr> {
+pub(super) struct Packet<M: ByteRepr> {
     pub(super) ack: PacketAck,
     pub(super) reliable: bool,
     pub(super) ordered: bool,
@@ -23,7 +23,7 @@ pub struct Packet<M: ByteRepr> {
 
 impl<M: ByteRepr> Packet<M> {
     #[inline(always)]
-    pub fn heartbeat(ack: PacketAck) -> Self {
+    pub(super) fn heartbeat(ack: PacketAck) -> Self {
         Self {
             ack,
             reliable: false,
