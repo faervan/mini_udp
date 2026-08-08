@@ -1,4 +1,9 @@
 # mini_udp
+
+[![Docs](https://img.shields.io/docsrs/mini_udp/latest)](https://docs.rs/mini_udp/latest/mini_udp/)
+[![License](https://img.shields.io/crates/l/mini_udp.svg)](https://github.com/faervan/mini_udp#license)
+[![Crates.io](https://img.shields.io/crates/v/mini_udp.svg)](https://crates.io/crates/mini_udp)
+
 A minimal, fully synchronous implementation of a reliability protocol on top of UDP.
 
 This was inspired by Glenn Fiedler, who wrote an amazing set of articles about this:

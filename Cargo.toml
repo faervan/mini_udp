@@ -8,6 +8,7 @@ edition = "2024"
 description = "A minimal implementation of a reliability protocol on top of UDP for game networking"
 authors = ["faervan <faervan@proton.me>"]
 license = "MIT OR Apache-2.0"
+readme = "README.md"
 repository = "https://github.com/faervan/mini_udp"
 keywords = ["gamedev", "udp", "networking", "reliable"]
 categories = ["network-programming", "game-development"]
