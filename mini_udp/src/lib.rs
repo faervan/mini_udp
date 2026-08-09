@@ -630,13 +630,46 @@ mod test {
         );
     }
 
+    #[test]
+    fn option() {
+        crate::test_bitrepr_roundtrip!(o, Option::<String>, Some(String::from("Hello Option!")));
+        crate::test_bitrepr_roundtrip!(o, Option::<String>, None);
+
+        #[derive(ByteRepr, Debug, PartialEq)]
+        struct A(Option<bool>);
+        crate::test_bitrepr_roundtrip!(a, A, A(Some(false)));
+        crate::test_bitrepr_roundtrip!(a, A, A(None));
+
+        #[derive(ByteRepr, Debug, PartialEq)]
+        struct B<'a> {
+            a: String,
+            b: Option<String>,
+            c: usize,
+            d: Option<Cow<'a, String>>,
+            e: bool,
+            f: String,
+        }
+        crate::test_bitrepr_roundtrip!(
+            b,
+            B,
+            B {
+                a: "Hello world".to_string(),
+                b: None,
+                c: 299,
+                d: Some(Cow::Borrowed(&"Do you like cats?".to_string())),
+                e: true,
+                f: "I don't know what to write anymore".to_string()
+            }
+        );
+    }
+
     #[macro_export]
     macro_rules! test_bitrepr_roundtrip {
-        ($binding:ident, $ty:ident, $init:expr) => {
-            let mut buf = [0; $ty::MAX_BYTE_LEN];
+        ($binding:ident, $ty:ty, $init:expr) => {
+            let mut buf = [0; <$ty>::MAX_BYTE_LEN];
             let $binding = $init;
             assert!($binding.write_to_bytes(&mut buf).is_ok());
-            assert_eq!($ty::from_bytes(&buf).unwrap(), $binding);
+            assert_eq!(<$ty>::from_bytes(&buf).unwrap(), $binding);
         };
     }
 }

@@ -12,7 +12,7 @@ pub struct Context {
 }
 
 pub struct Field {
-    byte_offset: usize,
+    byte_offset: ByteOffset,
     pub ident: FieldIdentifier,
     pub value: Value,
     /// If `true`, use a variable identifier to access this field when calculating the length.
@@ -28,7 +28,7 @@ impl Field {
         is_part_of_enum: bool,
     ) -> Self {
         let this = Self {
-            byte_offset: context.byte_offset,
+            byte_offset: ByteOffset::Static(context.byte_offset),
             ident,
             value,
             use_variable_field_access: is_part_of_enum,
@@ -47,6 +47,11 @@ impl Field {
         }
     }
 
+    fn with_dynamic_byte_offset(mut self) -> Self {
+        self.byte_offset = ByteOffset::Dynamic;
+        self
+    }
+
     pub fn read_fixed_part(&self) -> TokenStream2 {
         let length = self.length();
         let ident = self.ident.as_tokens(true);
@@ -55,24 +60,27 @@ impl Field {
             Value::Cow { .. } => return quote! {},
             _ => {}
         }
-        if length.fixed_bytes == 1 {
-            let byte = self.byte_offset;
+        if length.fixed_bytes == 1 || matches!(self.value, Value::Option { .. }) {
+            let byte = self.byte_offset.get();
             let access =
                 quote! {*bytes.get(#byte).ok_or(::mini_udp::ByteReprError::SliceTooShort)?};
             let value = match &self.value {
                 Value::Bool => quote! {#access == 1},
+                Value::Option { .. } => {
+                    let fixed_ident = self.fixed_ident();
+                    return quote! {let #fixed_ident = #access == 1;};
+                }
                 Value::U8 => access,
                 Value::I8 => quote! {#access as i8},
                 _ => unreachable!(),
             };
             return quote! {let #ident = #value;};
         }
-        let byte_start = self.byte_offset;
         let len = length.fixed_bytes;
-        let byte_end = byte_start + len;
+        let slice_index = self.byte_offset.get_range(len);
         let bytes = quote! {
             TryInto::<[u8; #len]>::try_into(
-                bytes.get(#byte_start..#byte_end).ok_or(::mini_udp::ByteReprError::SliceTooShort)?
+                bytes.get(#slice_index).ok_or(::mini_udp::ByteReprError::SliceTooShort)?
             )
             .map_err(|_| ::mini_udp::ByteReprError::SliceTooShort)?
         };
@@ -89,7 +97,9 @@ impl Field {
     }
 
     pub fn read_variable_part(&self) -> TokenStream2 {
-        if self.length().is_static() && !matches!(self.value, Value::Cow { .. }) {
+        if self.length().is_static()
+            && !matches!(self.value, Value::Cow { .. } | Value::Option { .. })
+        {
             return quote! {};
         }
         let ident = self.ident.as_tokens(true);
@@ -120,6 +130,25 @@ impl Field {
                         #fixed_inner
                         #variable_inner
                         std::borrow::Cow::Owned(#inner_ident)
+                    };
+                }
+            }
+            Value::Option { ty } => {
+                let inner_identifier = FieldIdentifier::from_name("inner");
+                let inner_ident = inner_identifier.as_tokens(true);
+                let inner = self
+                    .copy_with(inner_identifier, (**ty).clone())
+                    .with_dynamic_byte_offset();
+                let fixed_inner = inner.read_fixed_part();
+                let variable_inner = inner.read_variable_part();
+                quote! {
+                    let #ident = match #fixed_ident {
+                        true => {
+                            #fixed_inner
+                            #variable_inner
+                            Some(#inner_ident)
+                        }
+                        false => None
                     };
                 }
             }
@@ -166,26 +195,26 @@ impl Field {
         }
         let ident = self.ident.as_tokens(false);
         let length = self.length();
-        if length.fixed_bytes == 1 {
-            let byte = self.byte_offset;
+        if length.fixed_bytes == 1 || matches!(self.value, Value::Option { .. }) {
+            let byte = self.byte_offset.get();
             let access =
                 quote! {*bytes.get_mut(#byte).ok_or(::mini_udp::ByteReprError::SliceTooShort)?};
             let byte_value = match &self.value {
                 Value::Bool => quote! {if *#ident {1} else {0}},
+                Value::Option { .. } => quote! {if #ident.is_some() {1} else {0}},
                 Value::U8 => quote! {*#ident},
                 Value::I8 => quote! {*#ident as u8},
                 _ => unreachable!(),
             };
             return quote! {#access = #byte_value;};
         }
-        let byte_start = self.byte_offset;
         let len = match length.is_static() {
             true => length.fixed_bytes,
             false => 4,
         };
-        let byte_end = byte_start + len;
+        let slice_index = self.byte_offset.get_range(len);
         let access = quote! {
-            bytes.get_mut(#byte_start..#byte_end).ok_or(::mini_udp::ByteReprError::SliceTooShort)?
+            bytes.get_mut(#slice_index).ok_or(::mini_udp::ByteReprError::SliceTooShort)?
         };
         let thing = match length.is_static() {
             true => ident,
@@ -204,7 +233,9 @@ impl Field {
     }
 
     pub fn write_variable_part(&self) -> TokenStream2 {
-        if self.length().is_static() {
+        if self.length().is_static()
+            && !matches!(self.value, Value::Cow { .. } | Value::Option { .. })
+        {
             return quote! {};
         }
         let ident = self.ident.as_tokens(false);
@@ -232,6 +263,21 @@ impl Field {
                 quote! {
                     #fixed_inner
                     #variable_inner
+                }
+            }
+            Value::Option { ty } => {
+                let inner_identifier = FieldIdentifier::Access(quote! {inner});
+                let inner_ident = inner_identifier.as_tokens(true);
+                let inner = self
+                    .copy_with(inner_identifier, (**ty).clone())
+                    .with_dynamic_byte_offset();
+                let fixed_inner = inner.write_fixed_part();
+                let variable_inner = inner.write_variable_part();
+                quote! {
+                    if let Some(#inner_ident) = #ident {
+                        #fixed_inner
+                        #variable_inner
+                    }
                 }
             }
             Value::Array { .. } => {
@@ -336,6 +382,26 @@ pub enum Value {
     )]
     Cow { ty: Box<Self> },
     #[assoc(
+        name = quote! {Option<#_ty>}.to_token_stream(),
+        length = {
+            let inner_ident = quote! {inner};
+            let ty_len = _ty.length(inner_ident.clone());
+            let inner_length = ty_len.as_length();
+            ByteLen::known_fixed_unknown_length(
+                1,
+                ty_len.as_const_max_length(),
+                quote! {
+                    if let Some(#inner_ident) = &#field {
+                        #inner_length
+                    } else {
+                        0
+                    }
+                }
+            )
+        }
+    )]
+    Option { ty: Box<Self> },
+    #[assoc(
         name = quote! {[#_ty; #_length]}.to_token_stream(),
         length = ByteLen::fully_unknown(
             quote! {<#_ty>::MIN_BYTE_LEN * #_length},
@@ -427,6 +493,13 @@ impl Value {
                                     };
                                 }
                             }
+                            "Option" => {
+                                if let Some(syn::GenericArgument::Type(t)) = args.last() {
+                                    return Self::Option {
+                                        ty: Box::new(Self::from_type(t)),
+                                    };
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -450,6 +523,43 @@ impl Value {
 impl ToTokens for Value {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         tokens.extend(self.name());
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ByteOffset {
+    Static(usize),
+    Dynamic,
+}
+
+impl ByteOffset {
+    fn get(&self) -> TokenStream2 {
+        match self {
+            Self::Static(n) => quote! {#n},
+            Self::Dynamic => quote! {
+                {
+                    let index = byte_ptr;
+                    byte_ptr += 1;
+                    index
+                }
+            },
+        }
+    }
+
+    fn get_range(&self, len: usize) -> TokenStream2 {
+        match self {
+            Self::Static(start) => {
+                let end = start + len;
+                quote! {#start..#end}
+            }
+            Self::Dynamic => quote! {
+                {
+                    let index = byte_ptr..byte_ptr + #len;
+                    byte_ptr += #len;
+                    index
+                }
+            },
+        }
     }
 }
 
