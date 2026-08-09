@@ -106,6 +106,7 @@ impl Field {
                     let #ident = String::from_utf8_lossy(
                         &bytes[byte_ptr..byte_ptr + #fixed_ident]
                     ).into_owned();
+                    byte_ptr += #fixed_ident;
                 }
             }
             Value::Cow { ty } => {
@@ -114,12 +115,10 @@ impl Field {
                 let inner = self.copy_with(inner_identifier, (**ty).clone());
                 let fixed_inner = inner.read_fixed_part();
                 let variable_inner = inner.read_variable_part();
-                let length = inner.length().as_length();
                 quote! {
                     let #ident = {
                         #fixed_inner
                         #variable_inner
-                        byte_ptr += #length;
                         std::borrow::Cow::Owned(#inner_ident)
                     };
                 }
@@ -230,11 +229,9 @@ impl Field {
                 let inner = self.copy_with(inner_identifier, (**ty).clone());
                 let fixed_inner = inner.write_fixed_part();
                 let variable_inner = inner.write_variable_part();
-                let length = inner.length().as_length();
                 quote! {
                     #fixed_inner
                     #variable_inner
-                    byte_ptr += #length;
                 }
             }
             Value::Array { .. } => {

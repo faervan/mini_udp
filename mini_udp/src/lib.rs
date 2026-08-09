@@ -598,6 +598,36 @@ mod test {
 
         assert_eq!(C::BYTE_LEN, 16);
         crate::test_bitrepr_roundtrip!(c, C, C(Cow::Borrowed(&u128::MAX)));
+
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct D<'a> {
+            msg: Cow<'a, str>,
+            n: String,
+        }
+        crate::test_bitrepr_roundtrip!(
+            d,
+            D,
+            D {
+                msg: "What does the cow say?".to_string().into(),
+                n: "MOOOOHHHH!".to_string()
+            }
+        );
+
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct E<'a> {
+            a: String,
+            b: Cow<'a, str>,
+            c: String,
+        }
+        crate::test_bitrepr_roundtrip!(
+            e,
+            E,
+            E {
+                a: "a".to_string(),
+                b: "b".to_string().into(),
+                c: "c".to_string()
+            }
+        );
     }
 
     #[macro_export]
