@@ -1,4 +1,4 @@
-use std::{fmt::Debug, marker::PhantomData};
+use std::fmt::Debug;
 
 #[derive(Debug)]
 /// A ring buffer with a capacity of `NUM_ITEMS` items.
@@ -113,7 +113,6 @@ impl<T, const NUM_ITEMS: usize> RingBuffer<T, NUM_ITEMS> {
         IterMut {
             i: self.newest.wrapping_sub(NUM_ITEMS as u16 - 1),
             ring: self,
-            _marker: PhantomData,
         }
     }
 
@@ -130,7 +129,6 @@ impl<T, const NUM_ITEMS: usize> RingBuffer<T, NUM_ITEMS> {
         IterValuesMut {
             i: self.newest.wrapping_sub(NUM_ITEMS as u16 - 1),
             ring: self,
-            _marker: PhantomData,
         }
     }
 
@@ -203,39 +201,36 @@ impl<'a, T, const NUM_ITEMS: usize> Iterator for Iter<'a, T, NUM_ITEMS> {
 
 pub struct IterMut<'a, T, const NUM_ITEMS: usize> {
     i: u16,
-    ring: *mut RingBuffer<T, NUM_ITEMS>,
-    _marker: PhantomData<&'a mut RingBuffer<T, NUM_ITEMS>>,
+    ring: &'a mut RingBuffer<T, NUM_ITEMS>,
 }
 
 impl<'a, T, const NUM_ITEMS: usize> Iterator for IterMut<'a, T, NUM_ITEMS> {
     type Item = (u16, &'a mut T);
     fn next(&mut self) -> Option<Self::Item> {
-        unsafe {
-            let ring = &mut *self.ring;
-            for i in wrapping_range(self.i, ring.newest.wrapping_add(1)) {
-                self.i = self.i.wrapping_add(1);
-                if let Some(item) = ring.get_mut(i) {
-                    let item_ptr = item as *mut T;
-                    return Some((i, &mut *item_ptr));
-                }
+        let ring = &mut self.ring;
+        debug_assert!(ring.newest.wrapping_add(1).wrapping_sub(self.i) <= NUM_ITEMS as u16);
+        for i in wrapping_range(self.i, ring.newest.wrapping_add(1)) {
+            self.i = self.i.wrapping_add(1);
+            if let Some(item) = ring.get_mut(i) {
+                let item_ptr = item as *mut T;
+                // SAFETY: Every item is only returned at most once.
+                let item = unsafe { &mut *item_ptr };
+                return Some((i, item));
             }
         }
         None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        unsafe {
-            let ring = &mut *self.ring;
-            let len = ring.len();
-            if len == 0 || wrapping_gt(self.i.wrapping_sub(1), ring.newest, NUM_ITEMS as u16) {
-                (0, Some(0))
-            } else {
-                let unvisited = ring.newest.wrapping_sub(self.i).wrapping_add(1) as usize;
-                (
-                    len.saturating_sub(NUM_ITEMS.saturating_sub(unvisited)),
-                    Some(unvisited.min(len)),
-                )
-            }
+        let len = self.ring.len();
+        if len == 0 || wrapping_gt(self.i.wrapping_sub(1), self.ring.newest, NUM_ITEMS as u16) {
+            (0, Some(0))
+        } else {
+            let unvisited = self.ring.newest.wrapping_sub(self.i).wrapping_add(1) as usize;
+            (
+                len.saturating_sub(NUM_ITEMS.saturating_sub(unvisited)),
+                Some(unvisited.min(len)),
+            )
         }
     }
 }
@@ -273,39 +268,35 @@ impl<'a, T, const NUM_ITEMS: usize> Iterator for IterValues<'a, T, NUM_ITEMS> {
 
 pub struct IterValuesMut<'a, T, const NUM_ITEMS: usize> {
     i: u16,
-    ring: *mut RingBuffer<T, NUM_ITEMS>,
-    _marker: PhantomData<&'a mut RingBuffer<T, NUM_ITEMS>>,
+    ring: &'a mut RingBuffer<T, NUM_ITEMS>,
 }
 
 impl<'a, T, const NUM_ITEMS: usize> Iterator for IterValuesMut<'a, T, NUM_ITEMS> {
     type Item = &'a mut T;
     fn next(&mut self) -> Option<Self::Item> {
-        unsafe {
-            let ring = &mut *self.ring;
-            for i in wrapping_range(self.i, ring.newest.wrapping_add(1)) {
-                self.i = self.i.wrapping_add(1);
-                if let Some(item) = ring.get_mut(i) {
-                    let item_ptr = item as *mut T;
-                    return Some(&mut *item_ptr);
-                }
+        debug_assert!(self.ring.newest.wrapping_add(1).wrapping_sub(self.i) <= NUM_ITEMS as u16);
+        for i in wrapping_range(self.i, self.ring.newest.wrapping_add(1)) {
+            self.i = self.i.wrapping_add(1);
+            if let Some(item) = self.ring.get_mut(i) {
+                let item_ptr = item as *mut T;
+                // SAFETY: Every item is only returned at most once.
+                let item = unsafe { &mut *item_ptr };
+                return Some(item);
             }
         }
         None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        unsafe {
-            let ring = &mut *self.ring;
-            let len = ring.len();
-            if len == 0 || wrapping_gt(self.i.wrapping_sub(1), ring.newest, NUM_ITEMS as u16) {
-                (0, Some(0))
-            } else {
-                let unvisited = ring.newest.wrapping_sub(self.i).wrapping_add(1) as usize;
-                (
-                    len.saturating_sub(NUM_ITEMS.saturating_sub(unvisited)),
-                    Some(unvisited.min(len)),
-                )
-            }
+        let len = self.ring.len();
+        if len == 0 || wrapping_gt(self.i.wrapping_sub(1), self.ring.newest, NUM_ITEMS as u16) {
+            (0, Some(0))
+        } else {
+            let unvisited = self.ring.newest.wrapping_sub(self.i).wrapping_add(1) as usize;
+            (
+                len.saturating_sub(NUM_ITEMS.saturating_sub(unvisited)),
+                Some(unvisited.min(len)),
+            )
         }
     }
 }

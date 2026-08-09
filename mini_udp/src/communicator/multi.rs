@@ -48,11 +48,11 @@ pub trait MultiCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     /// [`recv`](Self::recv) reads a packet from a [`SocketAddr`] that does not already have a
     /// connection. Connections are never automatically deleted by [`mini_udp`].
     fn iter_mut(&mut self) -> IterMut<'_, SEND, RECV>;
-    /// Broadcast the provided `message` to all connections reliably.
+    /// Broadcast the provided `message` to all connections, reliably.
     fn broadcast(&mut self, message: SEND)
     where
         SEND: Clone;
-    /// Broadcast the provided `message` to all connections except `exception` reliably.
+    /// Broadcast the provided `message` to all connections except `exception`, reliably.
     fn broadcast_except(&mut self, message: SEND, exception: SocketAddr)
     where
         SEND: Clone;
@@ -82,6 +82,60 @@ pub trait MultiCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     }
 }
 
+/// A wrapper around [`std::net::UdpSocket`] that will handle message (de)serialization,
+/// reliability, and ordering when connected to one or many other
+/// [`UdpCommunicators`](UdpCommunicator) or [`MultiUdpCommunicators`](MultiUdpCommunicator).
+///
+/// **Example**
+/// ```rust
+/// use mini_udp::prelude::*;
+///
+/// #[derive(ByteRepr, Debug, Clone, PartialEq)]
+/// enum Message {
+///     Hello {
+///         greeting: String
+///     },
+///     Number(Option<i32>),
+///     Bye,
+/// }
+///
+/// // Bind to "0.0.0.0:0", which lets the OS decide the port.
+/// let mut multi1 = MultiUdpCommunicator::default();
+/// let mut multi2 = MultiUdpCommunicator::bind("0.0.0.0:7005");
+///
+/// // Add a connection to multi1. This will not send any data to the provided address,
+/// // but enables us to start sending messages to it.
+/// let mut com: UdpCommunicatorMut<_, _> = multi1.connect("0.0.0.0:7005").unwrap();
+/// assert_eq!(com.addr.port(), 7005);
+///
+/// com.write_reliable(Message::Hello { greeting: String::from("Hello world!") });
+/// // The `broadcast*` methods send the provided message to all connections of this
+/// // [`MultiUdpCommunicator`], reliably but not necessarily in order.
+/// multi1.broadcast(Message::Number(Some(-500)));
+/// // Send all queued messages of all connections. Because the combined byte size of `Hello` and
+/// // `Number` is below the maximum packet data size of 1024, they will be added to the same packet
+/// // and are thus guaranteed to preserve their order.
+/// multi1.send();
+///
+/// // We have connected multi1 to multi2, but multi2 does not know about it yet!
+/// assert_eq!(multi2.iter_mut().count(), 0);
+/// // Receive all new packets.
+/// multi2.recv(());
+/// // When multi2 receives the packet we have just send to it from multi1, it will automatically
+/// // create a connection to multi1.
+/// assert_eq!(multi2.iter_mut().count(), 1);
+///
+/// multi2.for_each(|mut com| {
+///     assert_eq!(com.read(), Some(Message::Hello { greeting: String::from("Hello world!") }));
+///     assert_eq!(com.read(), Some(Message::Number(Some(-500))));
+///     com.write(Message::Bye);
+/// });
+/// multi2.send();
+///
+/// multi1.recv(|mut com: UdpCommunicatorMut<_, _>| {
+///     assert_eq!(com.read(), Some(Message::Bye));
+/// });
+/// ```
 pub struct MultiUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     socket: UdpCommunicatorSocket,
     coms: HashMap<SocketAddr, InnerUdpCommunicator<SEND, RECV>>,
@@ -262,6 +316,16 @@ where
     #[allow(unused_variables)]
     /// Will be called at the end of each [`MultiCommunicator::recv`] invocation.
     fn finish(&mut self, com: &mut MultiUdpCommunicator<SEND, RECV>, state: Self::State) {}
+}
+
+impl<SEND, RECV> OnReceiveCallback<(), SEND, RECV> for ()
+where
+    SEND: ByteRepr,
+    RECV: ByteRepr,
+{
+    type State = ();
+    fn prepare(&mut self) -> Self::State {}
+    fn on_recv(&mut self, _com: UdpCommunicatorMut<SEND, RECV>, _state: &mut Self::State) {}
 }
 
 impl<T, SEND, RECV> OnReceiveCallback<UdpCommunicatorMut<'_, SEND, RECV>, SEND, RECV> for T

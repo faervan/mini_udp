@@ -222,6 +222,9 @@ impl<'a, SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV>
 impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
     #[inline(always)]
     /// Connect to the provided `addr`.
+    ///
+    /// This does not actually send anything to the remote address, see
+    /// [`std::net::UdpSocket::connect`] for more info.
     pub fn connect<A: ToSocketAddrs>(self, addr: A) -> Result<Self, std::io::Error> {
         self.socket.socket.connect(addr)?;
         Ok(self)

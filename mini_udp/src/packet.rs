@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 /// The maximum allowed length of the data part of a UDP packet.
-/// The total maximum length is computed by adding the header length as well.
+/// The total maximum length ([`MAX_PACKET_LEN`]) is computed by adding the header length as well.
 pub const MAX_PACKET_DATA_LEN: usize = 1024;
 /// 4 bytes for the CRC, then the `PacketAck`, then 1 byte extra metadata (reliable, ordered),
 ///   finally 4 bytes for the amount of messages in the packet (this is not necessary as it can be

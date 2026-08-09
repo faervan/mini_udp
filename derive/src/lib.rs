@@ -9,6 +9,7 @@ mod data;
 mod data_group;
 
 #[proc_macro_derive(ByteRepr)]
+/// See the trait docs: [`ByteRepr`](https://docs.rs/mini_udp/latest/mini_udp/trait.ByteRepr.html)
 pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(token_input as DeriveInput);
     let ByteReprImpl {
