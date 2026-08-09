@@ -86,7 +86,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "mini_udp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crc",
  "mini_udp_derive",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "mini_udp_derive"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "enum-assoc",
  "proc-macro2",
