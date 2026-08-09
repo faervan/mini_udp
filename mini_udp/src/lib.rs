@@ -64,7 +64,7 @@
 extern crate self as mini_udp;
 
 mod byte_repr;
-pub use byte_repr::{ByteRepr, ByteReprError};
+pub use byte_repr::{ByteRepr, ByteReprError, StaticByteRepr};
 
 pub mod communicator;
 pub mod packet;
@@ -584,8 +584,20 @@ mod test {
         #[derive(ByteRepr, PartialEq, Debug)]
         struct A<'a>(Cow<'a, String>);
 
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct B<'a>(Cow<'a, str>);
+
         let s = String::from("What a beautiful day");
         crate::test_bitrepr_roundtrip!(a, A, A(Cow::Borrowed(&s)));
+
+        let s2 = "@€~ÜÖÄ²µå";
+        crate::test_bitrepr_roundtrip!(b, B, B(Cow::Borrowed(s2)));
+
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct C<'a>(Cow<'a, u128>);
+
+        assert_eq!(C::BYTE_LEN, 16);
+        crate::test_bitrepr_roundtrip!(c, C, C(Cow::Borrowed(&u128::MAX)));
     }
 
     #[macro_export]

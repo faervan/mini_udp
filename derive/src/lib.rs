@@ -12,6 +12,7 @@ mod data_group;
 pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(token_input as DeriveInput);
     let ByteReprImpl {
+        is_static,
         min_len,
         max_len,
         f_len,
@@ -32,7 +33,17 @@ pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
     };
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let ident = input.ident;
+    let impl_static = if is_static {
+        quote! {
+            impl #impl_generics ::mini_udp::StaticByteRepr for #ident #ty_generics #where_clause {
+                const BYTE_LEN: usize = #max_len;
+            }
+        }
+    } else {
+        quote! {}
+    };
     quote! {
+        #impl_static
         impl #impl_generics ::mini_udp::ByteRepr for #ident #ty_generics #where_clause {
             const MIN_BYTE_LEN: usize = #min_len;
             const MAX_BYTE_LEN: usize = #max_len;
@@ -59,6 +70,7 @@ pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
 }
 
 struct ByteReprImpl {
+    is_static: bool,
     min_len: TokenStream2,
     max_len: TokenStream2,
     f_len: TokenStream2,
@@ -74,6 +86,7 @@ fn impl_for_struct(ident: syn::Ident, data: syn::DataStruct) -> Result<ByteReprI
     let length = values.length();
 
     Ok(ByteReprImpl {
+        is_static: length.is_static(),
         f_len: length.as_length(),
         min_len: length.as_const_min_length(),
         max_len: length.as_const_max_length(),
@@ -202,6 +215,7 @@ fn impl_for_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<ByteReprImpl,
         }) + #variant_len
     };
     Ok(ByteReprImpl {
+        is_static: variants.iter().all(|f| f.length().is_static()),
         min_len: lowest_min_len(&variants, variant_len),
         max_len: lowest_max_len(&variants, variant_len),
         f_len,
@@ -338,6 +352,102 @@ impl DataAccessType {
             Self::U16 | Self::U32 => quote! {#access.copy_from_slice(#value)},
         }
     }
+}
+
+struct DeriveForInput {
+    ty: syn::Type,
+    generics: syn::Generics,
+    where_clause: Option<syn::WhereClause>,
+}
+
+impl syn::parse::Parse for DeriveForInput {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let ty = syn::Type::parse(input)?;
+        let generics = if input.is_empty() {
+            syn::Generics::default()
+        } else {
+            input.parse::<syn::Token![,]>()?;
+            syn::Generics::parse(input)?
+        };
+        let where_clause = if input.is_empty() {
+            None
+        } else {
+            Some(syn::WhereClause::parse(input)?)
+        };
+        Ok(Self {
+            ty,
+            generics,
+            where_clause,
+        })
+    }
+}
+
+#[doc(hidden)]
+#[proc_macro]
+pub fn derive_for(token_input: TokenStream) -> TokenStream {
+    let DeriveForInput {
+        ty,
+        generics,
+        where_clause,
+    } = parse_macro_input!(token_input as DeriveForInput);
+    let ty_ident = ty.to_token_stream();
+
+    let ident = data::FieldIdentifier::None;
+    let ident_binding = ident.as_tokens(true);
+    let mut context = Context::default();
+    let value = data::Field::new(&mut context, ident, data::Value::from_type(&ty), true);
+    let byte_ptr = context.byte_offset;
+    let read_fixed = value.read_fixed_part();
+    let read_variable = value.read_variable_part();
+    let write_fixed = value.write_fixed_part();
+    let write_variable = value.write_variable_part();
+    let length = value.length();
+    let min_len = length.as_const_min_length();
+    let max_len = length.as_const_max_length();
+    let f_len = length.as_length();
+
+    let impl_static = if length.is_static() {
+        quote! {
+            impl #generics ::mini_udp::StaticByteRepr for #ty_ident #where_clause {
+                const BYTE_LEN: usize = #max_len;
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    quote! {
+        #impl_static
+
+        impl #generics ::mini_udp::ByteRepr for #ty_ident #where_clause {
+            const MIN_BYTE_LEN: usize = #min_len;
+            const MAX_BYTE_LEN: usize = #max_len;
+            fn byte_len(&self) -> usize {
+                #f_len
+            }
+            fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), ::mini_udp::ByteReprError> {
+                #[cfg(debug_assertions)]
+                if cfg!(debug_assertions) && Self::MIN_BYTE_LEN == 0 {
+                    ::mini_udp::tracing::warn!("Serializing a zero-sized type is not meaningful!");
+                }
+                let #ident_binding = self;
+                #write_fixed
+                let mut byte_ptr = #byte_ptr;
+                #write_variable
+                Ok(())
+            }
+            fn from_bytes(bytes: &[u8]) -> Result<Self, ::mini_udp::ByteReprError> {
+                #[cfg(debug_assertions)]
+                if cfg!(debug_assertions) && Self::MIN_BYTE_LEN == 0 {
+                    ::mini_udp::tracing::warn!("Deserializing a zero-sized type is not meaningful!");
+                }
+                #read_fixed
+                let mut byte_ptr = #byte_ptr;
+                #read_variable
+                Ok(#ident_binding)
+            }
+        }
+    }.into()
 }
 
 fn compile_error(span: Span, msg: impl ToString) -> TokenStream {

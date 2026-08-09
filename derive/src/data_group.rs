@@ -126,7 +126,7 @@ impl Fields {
         self.fields
             .iter()
             .map(|field| {
-                let binding = syn::Ident::from(&field.ident);
+                let binding = field.ident.as_tokens(true);
                 match &field.ident {
                     FieldIdentifier::Named(ident) => {
                         quote! {#ident: #binding,}
@@ -134,6 +134,7 @@ impl Fields {
                     FieldIdentifier::Unnamed(_) => {
                         quote! {#binding,}
                     }
+                    FieldIdentifier::Access(_) | FieldIdentifier::None => unreachable!(),
                 }
             })
             .collect()

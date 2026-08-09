@@ -62,15 +62,15 @@ pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
 /// use std::borrow::Cow;
 ///
 /// #[derive(ByteRepr, Debug, PartialEq)]
-/// struct Message<'a>(Cow<'a, String>);
+/// struct Message<'a>(Cow<'a, str>);
 ///
 /// let mut com1 = UdpCommunicator::<_, ()>::bind("0.0.0.0:7002").connect("0.0.0.0:7003").unwrap();
 /// let mut com2 = UdpCommunicator::<(), _>::bind("0.0.0.0:7003").connect("0.0.0.0:7002").unwrap();
-/// let message = String::from("hello udp");
-/// com1.write(Message(Cow::Borrowed(&message)));
+/// let message = "hello udp";
+/// com1.write(Message(Cow::Borrowed(message)));
 /// com1.send().unwrap();
 /// com2.recv();
-/// assert_eq!(com2.read(), Some(Message(Cow::Owned(message))));
+/// assert_eq!(com2.read(), Some(Message(Cow::Owned(String::from(message)))));
 /// ```
 pub struct UdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     socket: UdpCommunicatorSocket,

@@ -1,4 +1,3 @@
-#[doc(hidden)]
 pub use mini_udp_derive::ByteRepr;
 
 pub use crate::byte_repr::{ByteRepr, ByteReprError, ByteReprExt, StaticByteRepr};
@@ -11,5 +10,5 @@ pub(crate) use crate::packet_ack::PacketAck;
 pub(crate) use std::time::{Duration, Instant};
 
 #[cfg(debug_assertions)]
-pub use tracing::debug;
-pub use tracing::{error, warn};
+pub(crate) use tracing::debug;
+pub(crate) use tracing::{error, warn};

@@ -15,10 +15,6 @@ pub(super) struct PacketAck {
     ordered_ack_bits: u32,
 }
 
-impl StaticByteRepr for PacketAck {
-    const BYTE_LEN: usize = PacketAck::MIN_BYTE_LEN;
-}
-
 impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
     pub(super) fn acknowledge(&mut self, ack: &PacketAck) {
         for i in 0..32 {

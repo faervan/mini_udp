@@ -15,7 +15,9 @@ pub struct Field {
     byte_offset: usize,
     pub ident: FieldIdentifier,
     pub value: Value,
-    is_part_of_enum: bool,
+    /// If `true`, use a variable identifier to access this field when calculating the length.
+    /// If `false`, use `self.field` to access this field when calculating the length.
+    use_variable_field_access: bool,
 }
 
 impl Field {
@@ -29,15 +31,30 @@ impl Field {
             byte_offset: context.byte_offset,
             ident,
             value,
-            is_part_of_enum,
+            use_variable_field_access: is_part_of_enum,
         };
         let fixed_len = this.length().fixed_bytes;
         context.byte_offset += fixed_len;
         this
     }
 
+    fn copy_with(&self, ident: FieldIdentifier, value: Value) -> Self {
+        Self {
+            byte_offset: self.byte_offset,
+            ident,
+            value,
+            use_variable_field_access: true,
+        }
+    }
+
     pub fn read_fixed_part(&self) -> TokenStream2 {
         let length = self.length();
+        let ident = self.ident.as_tokens(true);
+        match self.value {
+            Value::EmptyTuple => return quote! {let #ident = ();},
+            Value::Cow { .. } => return quote! {},
+            _ => {}
+        }
         if length.fixed_bytes == 1 {
             let byte = self.byte_offset;
             let access =
@@ -48,7 +65,6 @@ impl Field {
                 Value::I8 => quote! {#access as i8},
                 _ => unreachable!(),
             };
-            let ident = syn::Ident::from(&self.ident);
             return quote! {let #ident = #value;};
         }
         let byte_start = self.byte_offset;
@@ -61,7 +77,6 @@ impl Field {
             .map_err(|_| ::mini_udp::ByteReprError::SliceTooShort)?
         };
         if length.is_static() {
-            let ident = syn::Ident::from(&self.ident);
             let ty = self.value.name();
             quote! {let #ident = <#ty>::from_le_bytes(#bytes);}
         } else if let Value::String { .. } | Value::Vec { .. } = &self.value {
@@ -74,10 +89,10 @@ impl Field {
     }
 
     pub fn read_variable_part(&self) -> TokenStream2 {
-        if self.length().is_static() {
+        if self.length().is_static() && !matches!(self.value, Value::Cow { .. }) {
             return quote! {};
         }
-        let ident = syn::Ident::from(&self.ident);
+        let ident = self.ident.as_tokens(true);
         let fixed_ident = self.fixed_ident();
         match &self.value {
             Value::Delegated { ty } => {
@@ -94,11 +109,19 @@ impl Field {
                 }
             }
             Value::Cow { ty } => {
+                let inner_identifier = FieldIdentifier::from_name("inner");
+                let inner_ident = inner_identifier.as_tokens(true);
+                let inner = self.copy_with(inner_identifier, (**ty).clone());
+                let fixed_inner = inner.read_fixed_part();
+                let variable_inner = inner.read_variable_part();
+                let length = inner.length().as_length();
                 quote! {
-                    let mut #ident = std::borrow::Cow::Owned(
-                        #ty::from_bytes(&bytes[byte_ptr..])?
-                    );
-                    byte_ptr += std::borrow::Borrow::<#ty>::borrow(&#ident).byte_len();
+                    let #ident = {
+                        #fixed_inner
+                        #variable_inner
+                        byte_ptr += #length;
+                        std::borrow::Cow::Owned(#inner_ident)
+                    };
                 }
             }
             Value::Array { ty, length } => {
@@ -139,7 +162,10 @@ impl Field {
     }
 
     pub fn write_fixed_part(&self) -> TokenStream2 {
-        let ident = syn::Ident::from(&self.ident);
+        if let Value::EmptyTuple = self.value {
+            return quote! {};
+        }
+        let ident = self.ident.as_tokens(false);
         let length = self.length();
         if length.fixed_bytes == 1 {
             let byte = self.byte_offset;
@@ -163,7 +189,7 @@ impl Field {
             bytes.get_mut(#byte_start..#byte_end).ok_or(::mini_udp::ByteReprError::SliceTooShort)?
         };
         let thing = match length.is_static() {
-            true => ident.to_token_stream(),
+            true => ident,
             false => match self.value {
                 Value::String { .. } | Value::Vec { .. } => quote! {(#ident.len() as u32)},
                 Value::Array { .. } | Value::Cow { .. } | Value::Delegated { .. } => {
@@ -182,7 +208,7 @@ impl Field {
         if self.length().is_static() {
             return quote! {};
         }
-        let ident = syn::Ident::from(&self.ident);
+        let ident = self.ident.as_tokens(false);
         match &self.value {
             Value::Delegated { .. } => {
                 quote! {
@@ -199,9 +225,15 @@ impl Field {
                 }
             }
             Value::Cow { ty } => {
-                let length = ty.length(ident.to_token_stream()).as_length();
+                let inner_identifier =
+                    FieldIdentifier::Access(quote! {std::borrow::Borrow::<#ty>::borrow(#ident)});
+                let inner = self.copy_with(inner_identifier, (**ty).clone());
+                let fixed_inner = inner.write_fixed_part();
+                let variable_inner = inner.write_variable_part();
+                let length = inner.length().as_length();
                 quote! {
-                    #ident.write_to_bytes(&mut bytes[byte_ptr..])?;
+                    #fixed_inner
+                    #variable_inner
                     byte_ptr += #length;
                 }
             }
@@ -226,12 +258,14 @@ impl Field {
     }
 
     pub fn length(&self) -> ByteLen {
-        let field = match self.is_part_of_enum {
-            true => syn::Ident::from(&self.ident).into_token_stream(),
+        let field = match self.use_variable_field_access {
+            true => self.ident.as_tokens(false),
             false => {
                 let field = match &self.ident {
                     FieldIdentifier::Named(ident) => ident.to_token_stream(),
                     FieldIdentifier::Unnamed(index) => syn::Index::from(*index).into_token_stream(),
+                    FieldIdentifier::Access(_) => unreachable!(),
+                    FieldIdentifier::None => quote! {self},
                 };
                 quote! {self.#field}
             }
@@ -241,7 +275,7 @@ impl Field {
 
     fn fixed_ident(&self) -> syn::Ident {
         syn::Ident::new(
-            &format!("{}_fixed", syn::Ident::from(&self.ident)),
+            &format!("{}_fixed", self.ident.as_tokens(true)),
             Span::mixed_site(),
         )
     }
@@ -251,6 +285,8 @@ impl Field {
 #[func(fn name(&self) -> TokenStream2)]
 #[func(fn length(&self, field: TokenStream2) -> ByteLen)]
 pub enum Value {
+    #[assoc(name = quote! {()}, length = ByteLen::fully_static(0))]
+    EmptyTuple,
     #[assoc(name = quote! {bool}, length = ByteLen::fully_static(1))]
     Bool,
     #[assoc(name = quote! {u8}, length = ByteLen::fully_static(1))]
@@ -286,21 +322,20 @@ pub enum Value {
     #[assoc(name = quote! {i128}, length = ByteLen::fully_static(16))]
     I128,
     #[assoc(
-        name = quote! {String},
+        name = match _is_str {
+            true => quote! {str},
+            false => quote! {String},
+        },
         length = ByteLen::known_fixed_unknown_length(
             4,
             quote! {#_max_length},
             quote! {#field.len()}
         )
     )]
-    String { max_length: usize },
+    String { max_length: usize, is_str: bool },
     #[assoc(
         name = quote! {Cow<#_ty>}.to_token_stream(),
-        length = ByteLen::fully_unknown(
-            quote! {<#_ty>::MIN_BYTE_LEN},
-            quote! {<#_ty>::MAX_BYTE_LEN},
-            quote! {#field.byte_len()},
-        )
+        length = _ty.length(field),
     )]
     Cow { ty: Box<Self> },
     #[assoc(
@@ -356,7 +391,14 @@ impl Value {
                         "isize" => Self::ISize,
                         "u128" => Self::U128,
                         "i128" => Self::I128,
-                        "str" | "String" => Self::String { max_length: 1020 },
+                        "String" => Self::String {
+                            max_length: 1020,
+                            is_str: false,
+                        },
+                        "str" => Self::String {
+                            max_length: 1020,
+                            is_str: true,
+                        },
                         _ => Self::Delegated {
                             ty: Box::new(ty.clone()),
                         },
@@ -393,6 +435,7 @@ impl Value {
                     }
                 }
             },
+            syn::Type::Tuple(tuple) if tuple.elems.is_empty() => return Self::EmptyTuple,
             syn::Type::Array(syn::TypeArray { elem, len, .. }) => {
                 return Self::Array {
                     ty: Box::new(Self::from_type(elem)),
@@ -413,21 +456,30 @@ impl ToTokens for Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum FieldIdentifier {
     Named(syn::Ident),
     Unnamed(usize),
+    Access(TokenStream2),
+    None,
 }
 
-impl From<&FieldIdentifier> for syn::Ident {
-    fn from(value: &FieldIdentifier) -> Self {
-        match value {
+impl FieldIdentifier {
+    fn from_name(name: &str) -> Self {
+        Self::Named(syn::Ident::new(name, Span::mixed_site()))
+    }
+
+    pub fn as_tokens(&self, is_binding: bool) -> TokenStream2 {
+        match self {
             FieldIdentifier::Named(ident) => {
-                syn::Ident::new(&format!("named_{ident}"), Span::mixed_site())
+                syn::Ident::new(&format!("named_{ident}"), Span::mixed_site()).to_token_stream()
             }
             FieldIdentifier::Unnamed(index) => {
-                syn::Ident::new(&format!("unnamed_{index}"), Span::mixed_site())
+                syn::Ident::new(&format!("unnamed_{index}"), Span::mixed_site()).to_token_stream()
             }
+            FieldIdentifier::Access(access) => access.clone(),
+            FieldIdentifier::None if is_binding => quote! {this},
+            FieldIdentifier::None => quote! {self},
         }
     }
 }
@@ -488,7 +540,7 @@ impl ByteLen {
         }
     }
 
-    fn is_static(&self) -> bool {
+    pub fn is_static(&self) -> bool {
         self.unknown_min.is_empty() && self.unknown_max.is_empty() && self.unknown_length.is_empty()
     }
 
