@@ -18,7 +18,7 @@
 //!   ([`MAX_PACKET_DATA_LEN`](packet::MAX_PACKET_DATA_LEN)).
 //! - [x] Handle 1-X communication via a single, shared UDP socket
 //!   ([`MultiUdpCommunicator`](communicator::MultiUdpCommunicator)).
-//! - [x] Have a fully synchronous API, ideal for game networking.
+//! - [x] Have a fully synchronous, non-blocking API, ideal for game networking.
 //! - [ ] Messages cannot be fragmented yet, so **it is not possible to send messages larger than
 //!   1024 bytes! (yet)**
 //! - [ ] The [`ByteRepr`](macro@prelude::ByteRepr) derive is not very mindful of bandwidth yet
@@ -429,7 +429,7 @@ mod test {
         assert_eq!(
             DF::Z(
                 CA {
-                    named: 3.14,
+                    named: 3.149,
                     unnamed: true,
                     b: 123456789,
                 },
@@ -485,6 +485,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::enum_variant_names)]
     fn enum_roundtrip() {
         #[derive(ByteRepr, PartialEq, Debug)]
         enum A {
@@ -514,7 +515,7 @@ mod test {
             C::C {
                 byte0: 0,
                 byte1: 255,
-                float: 1031.420123
+                float: 1_031.42
             }
         );
         crate::test_bitrepr_roundtrip!(c, C, C::E(f64::MAX, 4, -193042.04, f64::MIN));
@@ -524,7 +525,7 @@ mod test {
     fn delegated() {
         #[derive(ByteRepr, PartialEq, Debug)]
         struct A {
-            x: f32,
+            x: f64,
             y: B,
         }
         #[derive(ByteRepr, PartialEq, Debug)]
@@ -534,7 +535,7 @@ mod test {
             a,
             A,
             A {
-                x: -2409406.3353,
+                x: -2_409_406.335_3,
                 y: B(3908221)
             }
         );
@@ -575,7 +576,7 @@ mod test {
     fn array() {
         #[derive(ByteRepr, PartialEq, Debug)]
         struct A {
-            list: [f32; 3],
+            list: [f64; 3],
         }
         #[derive(ByteRepr, PartialEq, Debug, Default, Clone, Copy)]
         struct B(usize);
@@ -589,7 +590,7 @@ mod test {
             a,
             A,
             A {
-                list: [1397.201, -0.0, -4010401.32914]
+                list: [1397.201, -0.0, -4_010_401.329_14]
             }
         );
         crate::test_bitrepr_roundtrip!(
@@ -613,6 +614,7 @@ mod test {
     #[test]
     fn cow() {
         #[derive(ByteRepr, PartialEq, Debug)]
+        #[allow(clippy::owned_cow)]
         struct A<'a>(Cow<'a, String>);
 
         #[derive(ByteRepr, PartialEq, Debug)]
@@ -672,6 +674,7 @@ mod test {
         crate::test_bitrepr_roundtrip!(a, A, A(None));
 
         #[derive(ByteRepr, Debug, PartialEq)]
+        #[allow(clippy::owned_cow)]
         struct B<'a> {
             a: String,
             b: Option<String>,

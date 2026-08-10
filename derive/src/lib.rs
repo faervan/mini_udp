@@ -46,7 +46,9 @@ pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
     quote! {
         #impl_static
         impl #impl_generics ::mini_udp::ByteRepr for #ident #ty_generics #where_clause {
+            #[allow(clippy::int_plus_one)]
             const MIN_BYTE_LEN: usize = #min_len;
+            #[allow(clippy::int_plus_one)]
             const MAX_BYTE_LEN: usize = #max_len;
             fn byte_len(&self) -> usize {
                 #f_len

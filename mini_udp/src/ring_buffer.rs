@@ -574,17 +574,14 @@ mod test {
     #[test]
     fn iterate_many() {
         let mut ring = super::RingBuffer::<u16>::new();
-        let range = 0..33;
-        for i in range {
+        for i in 0..33 {
             ring.push(i);
         }
         // 33 elements were inserted, so all 32 slots in the buffer should be filled.
         // The oldest element (0) was replaced by the last element (32), so the first element now is
         // 1.
-        let mut i = 1;
-        for item in ring.values() {
+        for (i, item) in (1..).zip(ring.values()) {
             assert_eq!(*item, i);
-            i += 1;
         }
     }
 
