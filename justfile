@@ -1,15 +1,52 @@
 expand:
 	cargo expand --lib -p mini_udp --tests
-sync-lib-rs-to-readme:
-	# #!/bin/sh
-	# if [[ -e ".readme.md.tmp" ]]; then
-	# 	echo "tmp file .readme.md.tmp already exists, delete it before retrying"
-	# 	exit 1
-	# fi
-	# touch .readme.md.tmp
-	# head -n 6 README.md >> .readme.md.tmp
-	# sed -e '/\/\/\!/!q' -e 's/\/\/\! //' -e 's/\/\/\!//' mini_udp/src/lib.rs >> .readme.md.tmp
-	# tail -n 15 README.md >> .readme.md.tmp
-	# cat .readme.md.tmp >| README.md
-	# rm .readme.md.tmp
-	cargo rdme -w mini_udp
+publish:
+	#!/bin/sh
+	version=$(sed -e '1,/\[workspace.package\]/d' -e '/^version =/q' Cargo.toml | cut -d \" -f 2)
+	major=$(echo $version | cut -d . -f 1)
+	minor=$(echo $version | cut -d . -f 2)
+	patch=$(echo $version | cut -d . -f 3)
+	cargo doc --all-features --config build.warnings=\"deny\" || exit 1
+	cargo clippy --all-targets --all-features --config build.warnings=\"deny\" || exit 1
+	cargo test --config build.warnings=\"deny\" || exit 1
+	echo "Current version is $major.$minor.$patch"
+	echo "You can make a"
+	echo "  [1] Major update"
+	echo "  [2] Minor update"
+	echo "  [3] Patch"
+	echo -n "Select [1/2/3] "
+	read line
+	if [[ $line -eq 1 ]]; then
+		next="$((major+1)).$minor.$patch"
+	elif [[ $line -eq 2 ]]; then
+		next="$major.$((minor+1)).$patch"
+	elif [[ $line -eq 3 ]]; then
+		next="$major.$minor.$((patch+1))"
+	else
+		exit 1
+	fi
+	echo "Next version will be $next"
+	echo -n "Is that correct? [y/n] "
+	read line
+	if [[ $line != "y" && $line != "Y" ]]; then
+		exit 1
+	fi
+	cargo rdme -w mini_udp || exit 1
+	derive_line="mini_udp_derive = { path = \"derive\", version = \"$version\" }"
+	grep -q "$derive_line" Cargo.toml || {
+		echo -e "\nFailed to find derive dependency line"
+		exit 1
+	}
+	sed -e "0,/version = \"$version\"/s/version = \"$version\"/version = \"$next\"/" -i Cargo.toml
+	sed -e "0,/$derive_line/s/version = \"$version\"/version = \"$next\"/" -i Cargo.toml
+	echo -e "\n\033[32mAll done. You can now commit and publish:\033[0m"
+	echo -e "\tgit commit -am \"chore: release v$next\""
+	echo -e "\tgit push"
+	echo -e "\tcargo publish"
+	echo -en "\nDo that? [y/n] "
+	read line
+	if [[ $line == "y" || $line == "Y" ]]; then
+		git commit -am \"chore: release v$next\"
+		git push
+		cargo publish
+	fi
