@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 //! # Overview
 //! A minimal, fully synchronous implementation of a reliability protocol on top of UDP.
 //!

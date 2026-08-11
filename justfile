@@ -42,6 +42,8 @@ publish:
 	}
 	sed -e "0,/version = \"$version\"/s/version = \"$version\"/version = \"$next\"/" -i Cargo.toml
 	sed -e "0,/$derive_line/s/version = \"$version\"/version = \"$next\"/" -i Cargo.toml
+	# Update Cargo.lock
+	cargo build
 	echo -e "\n\033[32mAll done. You can now commit and publish:\033[0m"
 	echo -e "\tgit commit -am \"chore: release v$next\""
 	echo -e "\tgit push"
