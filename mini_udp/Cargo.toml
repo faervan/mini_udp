@@ -12,14 +12,14 @@ categories.workspace = true
 exclude.workspace = true
 
 [features]
-default = []
+default = ["debug"]
+debug = ["dep:rand"]
 
 [dependencies]
 mini_udp_derive.workspace = true
 
 crc.workspace = true
-rand.workspace = true
-ringbuffer.workspace = true
+rand = { workspace = true, optional = true }
 
 tracing.workspace = true
 thiserror.workspace = true

@@ -91,7 +91,6 @@ dependencies = [
  "crc",
  "mini_udp_derive",
  "rand",
- "ringbuffer",
  "thiserror",
  "tracing",
  "tracing-subscriber",
@@ -168,12 +167,6 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
-
-[[package]]
-name = "ringbuffer"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57b0b88a509053cbfd535726dcaaceee631313cef981266119527a1d110f6d2b"
 
 [[package]]
 name = "sharded-slab"

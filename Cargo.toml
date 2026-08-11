@@ -19,7 +19,6 @@ mini_udp_derive = { path = "derive", version = "0.2.0" }
 
 crc = "3.4"
 rand = "0.10"
-ringbuffer = { version = "0.16", default-features = false }
 
 tracing = "0.1"
 tracing-subscriber = "0.3"

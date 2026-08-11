@@ -137,7 +137,7 @@ pub trait MultiCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
 /// });
 /// ```
 pub struct MultiUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
-    socket: UdpCommunicatorSocket,
+    pub(super) socket: UdpCommunicatorSocket,
     coms: HashMap<SocketAddr, InnerUdpCommunicator<SEND, RECV>>,
 }
 
@@ -183,6 +183,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
             std::io::Error::other("The provided `addr` parses into an empty SocketAddr iterator")
         })?;
         Ok(UdpCommunicatorMut {
+            #[cfg(feature = "debug")]
             socket: &self.socket,
             addr,
             inner: self.coms.entry(addr).or_default(),
@@ -195,7 +196,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     {
         let mut state = on_recv.prepare();
         while let Ok((n, addr)) = self.socket.socket.recv_from(&mut self.socket.data_buffer) {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             if self.socket.delay_packet(Some(addr), n) {
                 continue;
             }
@@ -203,6 +204,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
             com.read_packet(n, &mut self.socket);
             on_recv.on_recv(
                 UdpCommunicatorMut {
+                    #[cfg(feature = "debug")]
                     socket: &self.socket,
                     addr,
                     inner: com,
@@ -210,7 +212,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
                 &mut state,
             );
         }
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "debug")]
         while let Some((n, Some(addr))) = self.socket.read_delayed() {
             let com = self.coms.entry(addr).or_default();
             com.read_packet(n, &mut self.socket);
@@ -236,6 +238,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
 
     fn iter_mut(&mut self) -> IterMut<'_, SEND, RECV> {
         IterMut {
+            #[cfg(feature = "debug")]
             socket: &self.socket,
             inner: self.coms.iter_mut(),
         }
@@ -265,6 +268,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     {
         for (addr, com) in self.coms.iter_mut() {
             f(UdpCommunicatorMut {
+                #[cfg(feature = "debug")]
                 socket: &self.socket,
                 addr: *addr,
                 inner: com,
@@ -278,6 +282,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     {
         self.coms.retain(|addr, inner| {
             filter(UdpCommunicatorMut {
+                #[cfg(feature = "debug")]
                 socket: &self.socket,
                 addr: *addr,
                 inner,
@@ -295,6 +300,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> MultiCommunicator<SEND, RECV>
     ) -> Option<UdpCommunicatorMut<'a, SEND, RECV>> {
         let inner = self.coms.get_mut(addr)?;
         Some(UdpCommunicatorMut {
+            #[cfg(feature = "debug")]
             socket: &self.socket,
             addr: *addr,
             inner,
@@ -469,6 +475,7 @@ where
     SEND: ByteRepr,
     RECV: ByteRepr,
 {
+    #[cfg(feature = "debug")]
     socket: &'a UdpCommunicatorSocket,
     inner: std::collections::hash_map::IterMut<'a, SocketAddr, InnerUdpCommunicator<SEND, RECV>>,
 }
@@ -481,50 +488,11 @@ where
     type Item = UdpCommunicatorMut<'a, SEND, RECV>;
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|(addr, inner)| UdpCommunicatorMut {
+            #[cfg(feature = "debug")]
             socket: self.socket,
             addr: *addr,
             inner,
         })
-    }
-}
-
-impl<SEND: ByteRepr, RECV: ByteRepr> MultiUdpCommunicator<SEND, RECV> {
-    #[cfg(debug_assertions)]
-    /// Simulate fake UDP unreliability by randomly dropping packets according to the provided
-    /// probability.
-    /// This is currently only available on debug builds.
-    pub fn with_fake_drop(mut self, drop_probability: f64) -> Self {
-        self.socket = self.socket.with_fake_drop(drop_probability);
-        self
-    }
-
-    #[cfg(debug_assertions)]
-    /// Simulate fake UDP unreliability by randomly corrupting bits of packets according to the
-    /// provided probability (the probability determines how likely it is for a packet to be
-    /// corrupted, not how many bits will be flipped).
-    /// This is currently only available on debug builds.
-    pub fn with_fake_corruption(mut self, corruption_probability: f64) -> Self {
-        self.socket = self.socket.with_fake_corruption(corruption_probability);
-        self
-    }
-
-    #[cfg(debug_assertions)]
-    /// Add an extra delay to packet receiving by a random amount of milliseconds in the range of
-    /// the provided `delay_ms`.
-    /// Only packet receiving is affected by this, not sending.
-    /// This is currently only available on debug builds.
-    pub fn with_fake_delay(mut self, delay_ms: std::ops::Range<u64>) -> Self {
-        self.socket = self.socket.with_fake_delay(delay_ms);
-        self
-    }
-
-    #[cfg(debug_assertions)]
-    /// Enable debug logs like notifications when a packet has been artificially corrupted by
-    /// [`Self::with_fake_corruption`].
-    /// This is currently only available on debug builds.
-    pub fn with_debug_logs(mut self) -> Self {
-        self.socket = self.socket.with_debug_logs();
-        self
     }
 }
 

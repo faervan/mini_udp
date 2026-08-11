@@ -11,6 +11,12 @@ pub use multi::*;
 mod socket;
 pub use socket::*;
 
+#[cfg(feature = "debug")]
+mod debug;
+#[cfg(feature = "debug")]
+#[cfg_attr(docsrs, doc(cfg(feature = "debug")))]
+pub use debug::MiniUdpDebugExt;
+
 const PROTOCOL_VERSION: u32 = 0x00_00_00_01;
 /// [`crc::CRC_32_BZIP2`] with `init` set to [`PROTOCOL_VERSION`]
 const CRC_ALGORITHM: crc::Algorithm<u32> = crc::Algorithm {
@@ -103,6 +109,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for UdpCommunicator<SEND
 
 /// A connection of an [`MultiUdpCommunicator`].
 pub struct UdpCommunicatorMut<'a, SEND: ByteRepr, RECV: ByteRepr> {
+    #[cfg(feature = "debug")]
     socket: &'a UdpCommunicatorSocket,
     pub addr: SocketAddr,
     inner: &'a mut InnerUdpCommunicator<SEND, RECV>,
@@ -136,7 +143,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV> for UdpCommunicato
     #[inline(always)]
     fn write_heartbeat(&mut self) {
         self.inner.write_heartbeat(
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             &self.socket,
         );
     }
@@ -188,7 +195,7 @@ impl<'a, SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV>
     #[inline(always)]
     fn write_heartbeat(&mut self) {
         self.inner.write_heartbeat(
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             self.socket,
         );
     }
@@ -253,44 +260,6 @@ impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
         self.recv();
         self.send()
     }
-
-    #[cfg(debug_assertions)]
-    /// Simulate fake UDP unreliability by randomly dropping packets according to the provided
-    /// probability.
-    /// This is currently only available on debug builds.
-    pub fn with_fake_drop(mut self, drop_probability: f64) -> Self {
-        self.socket = self.socket.with_fake_drop(drop_probability);
-        self
-    }
-
-    #[cfg(debug_assertions)]
-    /// Simulate fake UDP unreliability by randomly corrupting bits of packets according to the
-    /// provided probability (the probability determines how likely it is for a packet to be
-    /// corrupted, not how many bits will be flipped).
-    /// This is currently only available on debug builds.
-    pub fn with_fake_corruption(mut self, corruption_probability: f64) -> Self {
-        self.socket = self.socket.with_fake_corruption(corruption_probability);
-        self
-    }
-
-    #[cfg(debug_assertions)]
-    /// Add an extra delay to packet receiving by a random amount of milliseconds in the range of
-    /// the provided `delay_ms`.
-    /// Only packet receiving is affected by this, not sending.
-    /// This is currently only available on debug builds.
-    pub fn with_fake_delay(mut self, delay_ms: std::ops::Range<u64>) -> Self {
-        self.socket = self.socket.with_fake_delay(delay_ms);
-        self
-    }
-
-    #[cfg(debug_assertions)]
-    /// Enable debug logs like notifications when a packet has been artificially corrupted by
-    /// [`Self::with_fake_corruption`].
-    /// This is currently only available on debug builds.
-    pub fn with_debug_logs(mut self) -> Self {
-        self.socket = self.socket.with_debug_logs();
-        self
-    }
 }
 
 #[cfg(test)]
@@ -320,7 +289,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashSet, thread::sleep};
+    use std::collections::HashSet;
 
     use tracing::debug;
 
@@ -366,12 +335,15 @@ mod test {
     #[test]
     fn test_reliability() {
         let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7204);
-        com1.socket = com1
-            .socket
-            .with_fake_drop(0.4)
-            .with_fake_corruption(0.1)
-            .with_debug_logs();
-        com2.socket = com2.socket.with_fake_drop(0.6).with_fake_corruption(0.2);
+        #[cfg(feature = "debug")]
+        {
+            com1.socket = com1
+                .socket
+                .with_fake_drop(0.4)
+                .with_fake_corruption(0.1)
+                .with_debug_logs();
+            com2.socket = com2.socket.with_fake_drop(0.6).with_fake_corruption(0.2);
+        }
         let mut send = HashSet::new();
         assert!(send.insert(InnerUdpMessage::Hello));
         for i in 0..20000 {
@@ -398,12 +370,15 @@ mod test {
     #[test]
     fn test_ordered_reliability() {
         let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7206);
-        com1.socket = com1
-            .socket
-            .with_fake_drop(0.4)
-            .with_fake_corruption(0.1)
-            .with_debug_logs();
-        com2.socket = com2.socket.with_fake_drop(0.6).with_fake_corruption(0.2);
+        #[cfg(feature = "debug")]
+        {
+            com1.socket = com1
+                .socket
+                .with_fake_drop(0.4)
+                .with_fake_corruption(0.1)
+                .with_debug_logs();
+            com2.socket = com2.socket.with_fake_drop(0.6).with_fake_corruption(0.2);
+        }
         let mut send = vec![];
         for i in 0..20000 {
             send.push(InnerUdpMessage::Wave(i));
@@ -430,6 +405,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "debug")]
     fn test_fake_delay() {
         let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7208);
         com1.socket = com1.socket.with_debug_logs();
@@ -439,6 +415,8 @@ mod test {
         let start = Instant::now();
         com1.send().unwrap();
         loop {
+            use std::thread::sleep;
+
             sleep(Duration::from_millis(1));
             com2.recv();
             if let Some(received) = com2.read() {
@@ -451,6 +429,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "debug")]
     fn test_fake_delay_multi() {
         let _ = tracing_subscriber::FmtSubscriber::builder()
             .with_test_writer()
@@ -468,6 +447,8 @@ mod test {
         com.send().unwrap();
         let mut break_loop = false;
         loop {
+            use std::thread::sleep;
+
             sleep(Duration::from_millis(1));
             multi_com.recv(|mut com: UdpCommunicatorMut<_, _>| {
                 assert_eq!(com.read_ordered().unwrap(), msg);

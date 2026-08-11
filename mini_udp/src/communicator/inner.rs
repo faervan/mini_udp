@@ -71,7 +71,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
             && self.reliable_ordered_send_queue.is_empty()
             && self.unreliable_send_queue.is_empty()
         {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             if socket.debug_logs {
                 debug!("Sending heartbeat");
             }
@@ -82,7 +82,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
                 &self.reliable_received_packets,
                 &self.reliable_ordered_received_packets,
             ));
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             if socket.debug_logs {
                 debug!("Constructed new hearbeat packet with id(unreliable): #{sequence_id}");
             }
@@ -90,7 +90,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         }
         self.received_packet_duplicate = false;
         self.flush_messages(
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             socket,
         );
         self.send_packets(addr, socket)
@@ -98,25 +98,25 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
 
     pub fn receive(&mut self, socket: &mut UdpCommunicatorSocket) {
         while let Ok(n) = socket.socket.recv(&mut socket.data_buffer) {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             if socket.delay_packet(None, n) {
                 continue;
             }
             self.read_packet(n, socket);
         }
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "debug")]
         while let Some((n, _)) = socket.read_delayed() {
             self.read_packet(n, socket);
         }
     }
 
     pub fn read_packet(&mut self, n: usize, socket: &mut UdpCommunicatorSocket) {
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "debug")]
         let packet = Packet::<RECV>::from_bytes(&socket.data_buffer[4..n])
             .unwrap()
             .ack
             .sequence_id;
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "debug")]
         // Fake UDP unreliability
         if let Some(p) = socket.corruption_probability
             && rand::random_bool(p)
@@ -134,13 +134,13 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         };
         let crc = u32::from_le_bytes(crc_bytes);
         if CRC.checksum(&socket.data_buffer[4..n]) != crc {
-            #[cfg(test)]
+            #[cfg(all(test, feature = "debug"))]
             warn!("CRC check failed, packet: {packet:#?}");
             return;
         }
         match Packet::<RECV>::from_bytes(&socket.data_buffer[4..n]) {
             Ok(packet) => {
-                #[cfg(debug_assertions)]
+                #[cfg(feature = "debug")]
                 // Fake UDP unreliability
                 if let Some(p) = socket.drop_probability
                     && rand::random_bool(p)
@@ -229,7 +229,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         }
     }
 
-    pub fn write_heartbeat(&mut self, #[cfg(debug_assertions)] socket: &UdpCommunicatorSocket) {
+    pub fn write_heartbeat(&mut self, #[cfg(feature = "debug")] socket: &UdpCommunicatorSocket) {
         let sequence_id = self.unreliable_send_packet_id;
         self.unreliable_send_packet_id = self.unreliable_send_packet_id.wrapping_add(1);
         let packet = Packet::heartbeat(PacketAck::new(
@@ -237,16 +237,16 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
             &self.reliable_received_packets,
             &self.reliable_ordered_received_packets,
         ));
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "debug")]
         if socket.debug_logs {
             debug!("Constructed new hearbeat packet with id(unreliable): #{sequence_id}");
         }
         self.unreliable_send_packets.push_back(packet);
     }
 
-    fn flush_messages(&mut self, #[cfg(debug_assertions)] socket: &UdpCommunicatorSocket) {
+    fn flush_messages(&mut self, #[cfg(feature = "debug")] socket: &UdpCommunicatorSocket) {
         flush_messages(
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             socket,
             &mut self.reliable_send_packets,
             &self.reliable_received_packets,
@@ -255,7 +255,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
             false,
         );
         flush_messages(
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             socket,
             &mut self.reliable_ordered_send_packets,
             &self.reliable_received_packets,
@@ -296,7 +296,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
                 ordered: false,
                 messages: self.unreliable_send_queue.drain(..included_msgs).collect(),
             };
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "debug")]
             if socket.debug_logs {
                 debug!(
                     "Constructed new unreliable packet #{sequence_id} with {included_msgs} messages"
@@ -376,7 +376,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
 }
 
 fn flush_messages<SEND: ByteRepr, RECV: ByteRepr>(
-    #[cfg(debug_assertions)] socket: &UdpCommunicatorSocket,
+    #[cfg(feature = "debug")] socket: &UdpCommunicatorSocket,
     send_packets: &mut RingBuffer<(Instant, Packet<SEND>)>,
     reliable_received: &RingBuffer<()>,
     ordered_received: &RingBuffer<Packet<RECV>>,
@@ -412,7 +412,7 @@ fn flush_messages<SEND: ByteRepr, RECV: ByteRepr>(
             ordered,
             messages: send_queue.drain(..included_msgs).collect(),
         };
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "debug")]
         if socket.debug_logs {
             debug!(
                 "Constructed new reliable {} packet #{sequence_id} with {included_msgs} messages",

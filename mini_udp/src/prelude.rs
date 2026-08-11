@@ -9,6 +9,6 @@ pub(crate) use crate::packet_ack::PacketAck;
 
 pub(crate) use std::time::{Duration, Instant};
 
-#[cfg(debug_assertions)]
+#[cfg(any(test, feature = "debug"))]
 pub(crate) use tracing::debug;
 pub(crate) use tracing::{error, warn};

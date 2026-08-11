@@ -7,8 +7,11 @@ publish:
 	minor=$(echo $version | cut -d . -f 2)
 	patch=$(echo $version | cut -d . -f 3)
 	cargo doc --all-features --config build.warnings=\"deny\" || exit 1
+	cargo doc --no-default-features --config build.warnings=\"deny\" || exit 1
 	cargo clippy --all-targets --all-features --config build.warnings=\"deny\" || exit 1
-	cargo test --config build.warnings=\"deny\" || exit 1
+	cargo clippy --all-targets --no-default-features --config build.warnings=\"deny\" || exit 1
+	cargo test --all-features --config build.warnings=\"deny\" || exit 1
+	cargo test --no-default-features --config build.warnings=\"deny\" || exit 1
 	echo "Current version is $major.$minor.$patch"
 	echo "You can make a"
 	echo "  [1] Major update"
