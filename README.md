@@ -21,11 +21,12 @@ All messages are (de)serialized by the in-house [`ByteRepr`](https://docs.rs/min
 ### Features
 - [x] Derive byte representations for Enums and Structs.
 - [x] Send unreliable, reliable, or reliable ordered messages over UDP.
+- [x] Verify packet integrity using a 4-byte CRC, seeded with a user-defined protocol version.
 - [x] Messages get combined into packets, with a maximum packet size of 1024 bytes
   ([`MAX_PACKET_DATA_LEN`](https://docs.rs/mini_udp/latest/mini_udp/packet/const.MAX_PACKET_DATA_LEN.html)).
 - [x] Handle 1-X communication via a single, shared UDP socket
   ([`MultiUdpCommunicator`](https://docs.rs/mini_udp/latest/mini_udp/communicator/multi/struct.MultiUdpCommunicator.html)).
-- [x] Have a fully synchronous API, ideal for game networking.
+- [x] Have a fully synchronous, non-blocking API, ideal for game networking.
 - [ ] Messages cannot be fragmented yet, so **it is not possible to send messages larger than
   1024 bytes! (yet)**
 - [ ] The [`ByteRepr`](https://docs.rs/mini_udp_derive/latest/mini_udp_derive/derive.ByteRepr.html) derive is not very mindful of bandwidth yet
@@ -49,12 +50,16 @@ enum MessageToClient {
     Bye,
 }
 
+/// The protocol version is used as seed for the CRC algorithm. Thus, when receiving a packet
+/// that was send from a communicator with a different version, the CRC check will fail.
+const PROTOCOL_VERSION: u32 = 1;
 const POSITION: [f32; 3] = [-1., 0.004, 2482.3];
 
-let mut server = MultiUdpCommunicator::bind("0.0.0.0:7001");
+let mut server = MultiUdpCommunicator::<_, _, PROTOCOL_VERSION>::bind("0.0.0.0:7001");
 // `UdpCommunicator::default()` binds the communicator to "0.0.0.0:0", which lets the OS decide
 // which port to use.
-let mut client = UdpCommunicator::default().connect("0.0.0.0:7001").unwrap();
+let mut client =
+    UdpCommunicator::<_, _, PROTOCOL_VERSION>::default().connect("0.0.0.0:7001").unwrap();
 
 // The `write*` methods only add the message to a queue, they won't be send until you explicitly
 // call `send()`.
@@ -67,7 +72,7 @@ loop {
     client.send().unwrap();
     // Receive all new packets. You can provide a callback function that will be called for each
     // received packet, with a mutable reference to the associated connection.
-    server.recv(|mut com: UdpCommunicatorMut<_, _>| {
+    server.recv(|mut com: UdpCommunicatorMut<_, _, _>| {
         if let Some(msg) = com.read_ordered() {
             messages_read += 1;
             match msg {

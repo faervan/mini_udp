@@ -26,7 +26,8 @@ pub trait MiniUdpDebugExt {
     fn with_debug_logs(self) -> Self;
 }
 
-impl<SEND, RECV> MiniUdpDebugExt for UdpCommunicator<SEND, RECV>
+impl<SEND, RECV, const PROTOCOL_VERSION: u32> MiniUdpDebugExt
+    for UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
 where
     SEND: ByteRepr,
     RECV: ByteRepr,
@@ -56,7 +57,8 @@ where
     }
 }
 
-impl<SEND, RECV> MiniUdpDebugExt for MultiUdpCommunicator<SEND, RECV>
+impl<SEND, RECV, const PROTOCOL_VERSION: u32> MiniUdpDebugExt
+    for MultiUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
 where
     SEND: ByteRepr,
     RECV: ByteRepr,

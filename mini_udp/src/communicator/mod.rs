@@ -17,20 +17,6 @@ mod debug;
 #[cfg_attr(docsrs, doc(cfg(feature = "debug")))]
 pub use debug::MiniUdpDebugExt;
 
-const PROTOCOL_VERSION: u32 = 0x00_00_00_01;
-/// [`crc::CRC_32_BZIP2`] with `init` set to [`PROTOCOL_VERSION`]
-const CRC_ALGORITHM: crc::Algorithm<u32> = crc::Algorithm {
-    width: 32,
-    poly: 0x04c11db7,
-    init: PROTOCOL_VERSION,
-    refin: false,
-    refout: false,
-    xorout: 0xffffffff,
-    check: 0xfc891918,
-    residue: 0xc704dd7b,
-};
-const CRC: crc::Crc<u32> = crc::Crc::<u32>::new(&CRC_ALGORITHM);
-
 pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
     /// Queue a message to be send unreliably.
     fn write(&mut self, message: SEND);
@@ -67,23 +53,33 @@ pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
 /// use mini_udp::prelude::*;
 /// use std::borrow::Cow;
 ///
+/// const PROTOCOL_VERSION: u32 = 2;
+///
 /// #[derive(ByteRepr, Debug, PartialEq)]
 /// struct Message<'a>(Cow<'a, str>);
 ///
-/// let mut com1 = UdpCommunicator::<_, ()>::bind("0.0.0.0:7002").connect("0.0.0.0:7003").unwrap();
-/// let mut com2 = UdpCommunicator::<(), _>::bind("0.0.0.0:7003").connect("0.0.0.0:7002").unwrap();
+/// let mut com1 =
+///     UdpCommunicator::<_, (), PROTOCOL_VERSION>::bind("0.0.0.0:7002")
+///         .connect("0.0.0.0:7003")
+///         .unwrap();
+/// let mut com2 =
+///     UdpCommunicator::<(), _, PROTOCOL_VERSION>::bind("0.0.0.0:7003")
+///         .connect("0.0.0.0:7002")
+///         .unwrap();
 /// let message = "hello udp";
 /// com1.write(Message(Cow::Borrowed(message)));
 /// com1.send().unwrap();
 /// com2.recv();
 /// assert_eq!(com2.read(), Some(Message(Cow::Owned(String::from(message)))));
 /// ```
-pub struct UdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
+pub struct UdpCommunicator<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> {
     socket: UdpCommunicatorSocket,
-    pub(super) inner: InnerUdpCommunicator<SEND, RECV>,
+    pub(super) inner: InnerUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>,
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for UdpCommunicator<SEND, RECV> {
+impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> CommunicatorSocket
+    for UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
+{
     /// Create a new [`UdpCommunicator`], binding it to the provided `addr`.
     fn bind<A: ToSocketAddrs>(addr: A) -> Self {
         Self {
@@ -108,14 +104,16 @@ impl<SEND: ByteRepr, RECV: ByteRepr> CommunicatorSocket for UdpCommunicator<SEND
 }
 
 /// A connection of an [`MultiUdpCommunicator`].
-pub struct UdpCommunicatorMut<'a, SEND: ByteRepr, RECV: ByteRepr> {
+pub struct UdpCommunicatorMut<'a, SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> {
     #[cfg(feature = "debug")]
     socket: &'a UdpCommunicatorSocket,
     pub addr: SocketAddr,
-    inner: &'a mut InnerUdpCommunicator<SEND, RECV>,
+    inner: &'a mut InnerUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>,
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr> Default for UdpCommunicator<SEND, RECV> {
+impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Default
+    for UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
+{
     fn default() -> Self {
         Self {
             socket: UdpCommunicatorSocket::bind("0.0.0.0:0"),
@@ -124,7 +122,9 @@ impl<SEND: ByteRepr, RECV: ByteRepr> Default for UdpCommunicator<SEND, RECV> {
     }
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV> for UdpCommunicator<SEND, RECV> {
+impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Communicator<SEND, RECV>
+    for UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
+{
     #[inline(always)]
     fn write(&mut self, message: SEND) {
         self.inner.unreliable_send_queue.push_back(message);
@@ -174,8 +174,8 @@ impl<SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV> for UdpCommunicato
     }
 }
 
-impl<'a, SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV>
-    for UdpCommunicatorMut<'a, SEND, RECV>
+impl<'a, SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Communicator<SEND, RECV>
+    for UdpCommunicatorMut<'a, SEND, RECV, PROTOCOL_VERSION>
 {
     #[inline(always)]
     fn write(&mut self, message: SEND) {
@@ -226,7 +226,9 @@ impl<'a, SEND: ByteRepr, RECV: ByteRepr> Communicator<SEND, RECV>
     }
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
+impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
+    UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
+{
     #[inline(always)]
     /// Connect to the provided `addr`.
     ///
@@ -265,7 +267,10 @@ impl<SEND: ByteRepr, RECV: ByteRepr> UdpCommunicator<SEND, RECV> {
 #[cfg(test)]
 pub(crate) fn test_init<SEND, RECV>(
     port_offset: u16,
-) -> (UdpCommunicator<SEND, RECV>, UdpCommunicator<SEND, RECV>)
+) -> (
+    UdpCommunicator<SEND, RECV, 1>,
+    UdpCommunicator<SEND, RECV, 1>,
+)
 where
     SEND: ByteRepr,
     RECV: ByteRepr,
@@ -278,10 +283,10 @@ where
     let localhost = std::net::IpAddr::V4(localhost);
     let addr1 = std::net::SocketAddr::new(localhost, port_offset);
     let addr2 = std::net::SocketAddr::new(localhost, port_offset + 1);
-    let com1 = UdpCommunicator::<SEND, RECV>::bind(addr1)
+    let com1 = UdpCommunicator::<SEND, RECV, _>::bind(addr1)
         .connect(addr2)
         .unwrap();
-    let com2 = UdpCommunicator::<SEND, RECV>::bind(addr2)
+    let com2 = UdpCommunicator::<SEND, RECV, _>::bind(addr2)
         .connect(addr1)
         .unwrap();
     (com1, com2)
@@ -435,10 +440,10 @@ mod test {
             .with_test_writer()
             .with_max_level(tracing::Level::DEBUG)
             .try_init();
-        let mut multi_com = MultiUdpCommunicator::<(), isize>::bind("0.0.0.0:7210")
+        let mut multi_com = MultiUdpCommunicator::<(), isize, 1>::bind("0.0.0.0:7210")
             .with_debug_logs()
             .with_fake_delay(25..26);
-        let mut com = UdpCommunicator::<isize, ()>::default()
+        let mut com = UdpCommunicator::<isize, (), 1>::default()
             .connect("0.0.0.0:7210")
             .unwrap();
         let msg = -240_594;
@@ -450,7 +455,7 @@ mod test {
             use std::thread::sleep;
 
             sleep(Duration::from_millis(1));
-            multi_com.recv(|mut com: UdpCommunicatorMut<_, _>| {
+            multi_com.recv(|mut com: UdpCommunicatorMut<_, _, 1>| {
                 assert_eq!(com.read_ordered().unwrap(), msg);
                 assert!(start.elapsed().as_millis() > 24);
                 assert!(start.elapsed().as_millis() < 28);
@@ -460,5 +465,19 @@ mod test {
                 break;
             }
         }
+    }
+
+    #[test]
+    fn test_protocol_version_check() {
+        let mut com1 = UdpCommunicator::<String, (), 1>::default()
+            .connect("0.0.0.0:7212")
+            .unwrap();
+        let mut com2 = UdpCommunicator::<(), String, 2>::bind("0.0.0.0:7212");
+        com1.write(String::from("Can you hear me?"));
+        com1.send().unwrap();
+        com2.recv();
+        // Sender send with a protocol version of 1, receiver has a version of 2, so the CRC check
+        // failed and no messages are available.
+        assert_eq!(com2.read(), None);
     }
 }

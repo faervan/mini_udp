@@ -15,7 +15,9 @@ pub(super) struct PacketAck {
     ordered_ack_bits: u32,
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
+impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
+    InnerUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
+{
     pub(super) fn acknowledge(&mut self, ack: &PacketAck) {
         for i in 0..32 {
             if ack.reliable_ack_bits & 1 << i != 0 {

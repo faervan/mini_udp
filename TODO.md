@@ -4,5 +4,5 @@
 - [ ] Add a "How it works" readme section, explaining how it works in a nutshell.
     - Unreliable vs. reliable vs. reliable ordered packets/message queues
 - [ ] Add a `set_packet_header_message` method to [`Communicator`], that makes all packets start with the provided message.
-- [ ] Allow the user to define the protocol version used to init the CRC.
+- [x] Allow the user to define the protocol version used to init the CRC.
 - [ ] Implement message fragmentation to allow large messages.

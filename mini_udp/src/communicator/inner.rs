@@ -1,12 +1,13 @@
 use std::collections::VecDeque;
 
 use crate::{
-    communicator::{CRC, SocketSendAddr},
+    communicator::SocketSendAddr,
     prelude::*,
     ring_buffer::{RingBuffer, wrapping_gt},
 };
 
-pub(crate) struct InnerUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
+pub(crate) struct InnerUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
+{
     pub reliable_send_packets: RingBuffer<(Instant, Packet<SEND>)>,
     pub reliable_ordered_send_packets: RingBuffer<(Instant, Packet<SEND>)>,
     pub reliable_received_packets: RingBuffer<()>,
@@ -31,7 +32,9 @@ pub(crate) struct InnerUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr> {
     pub received_ordered_packet_ids: std::collections::HashSet<u16>,
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr> Default for InnerUdpCommunicator<SEND, RECV> {
+impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Default
+    for InnerUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
+{
     fn default() -> Self {
         Self {
             reliable_send_packets: RingBuffer::new(),
@@ -57,7 +60,22 @@ impl<SEND: ByteRepr, RECV: ByteRepr> Default for InnerUdpCommunicator<SEND, RECV
     }
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
+impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
+    InnerUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
+{
+    /// [`crc::CRC_32_BZIP2`] with `init` set to [`PROTOCOL_VERSION`]
+    const CRC_ALGORITHM: crc::Algorithm<u32> = crc::Algorithm {
+        width: 32,
+        poly: 0x04c11db7,
+        init: PROTOCOL_VERSION,
+        refin: false,
+        refout: false,
+        xorout: 0xffffffff,
+        check: 0xfc891918,
+        residue: 0xc704dd7b,
+    };
+    const CRC: crc::Crc<u32> = crc::Crc::<u32>::new(&Self::CRC_ALGORITHM);
+
     pub fn send<Addr>(
         &mut self,
         addr: Addr,
@@ -133,7 +151,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
             return;
         };
         let crc = u32::from_le_bytes(crc_bytes);
-        if CRC.checksum(&socket.data_buffer[4..n]) != crc {
+        if Self::CRC.checksum(&socket.data_buffer[4..n]) != crc {
             #[cfg(all(test, feature = "debug"))]
             warn!("CRC check failed, packet: {packet:#?}");
             return;
@@ -338,7 +356,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
                         socket.data_buffer.len()
                     );
                 }
-                let crc = CRC.checksum(&socket.data_buffer[4..4 + packet.byte_len()]);
+                let crc = Self::CRC.checksum(&socket.data_buffer[4..4 + packet.byte_len()]);
                 socket.data_buffer[..4].copy_from_slice(&crc.to_le_bytes());
                 if let Err(e) = addr.send(socket, ..4 + packet.byte_len()) {
                     error!("Failed to send packet: {e}");
@@ -349,7 +367,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr> InnerUdpCommunicator<SEND, RECV> {
         }
         for packet in self.unreliable_send_packets.drain(..) {
             packet.write_to_bytes(&mut socket.data_buffer[4..])?;
-            let crc = CRC.checksum(&socket.data_buffer[4..4 + packet.byte_len()]);
+            let crc = Self::CRC.checksum(&socket.data_buffer[4..4 + packet.byte_len()]);
             socket.data_buffer[..4].copy_from_slice(&crc.to_le_bytes());
             if let Err(e) = addr.send(socket, ..4 + packet.byte_len()) {
                 error!("Failed to send packet: {e}");

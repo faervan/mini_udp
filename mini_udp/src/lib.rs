@@ -14,6 +14,7 @@
 //! ## Features
 //! - [x] Derive byte representations for Enums and Structs.
 //! - [x] Send unreliable, reliable, or reliable ordered messages over UDP.
+//! - [x] Verify packet integrity using a 4-byte CRC, seeded with a user-defined protocol version.
 //! - [x] Messages get combined into packets, with a maximum packet size of 1024 bytes
 //!   ([`MAX_PACKET_DATA_LEN`](packet::MAX_PACKET_DATA_LEN)).
 //! - [x] Handle 1-X communication via a single, shared UDP socket
@@ -42,12 +43,16 @@
 //!     Bye,
 //! }
 //!
+//! /// The protocol version is used as seed for the CRC algorithm. Thus, when receiving a packet
+//! /// that was send from a communicator with a different version, the CRC check will fail.
+//! const PROTOCOL_VERSION: u32 = 1;
 //! const POSITION: [f32; 3] = [-1., 0.004, 2482.3];
 //!
-//! let mut server = MultiUdpCommunicator::bind("0.0.0.0:7001");
+//! let mut server = MultiUdpCommunicator::<_, _, PROTOCOL_VERSION>::bind("0.0.0.0:7001");
 //! // `UdpCommunicator::default()` binds the communicator to "0.0.0.0:0", which lets the OS decide
 //! // which port to use.
-//! let mut client = UdpCommunicator::default().connect("0.0.0.0:7001").unwrap();
+//! let mut client =
+//!     UdpCommunicator::<_, _, PROTOCOL_VERSION>::default().connect("0.0.0.0:7001").unwrap();
 //!
 //! // The `write*` methods only add the message to a queue, they won't be send until you explicitly
 //! // call `send()`.
@@ -60,7 +65,7 @@
 //!     client.send().unwrap();
 //!     // Receive all new packets. You can provide a callback function that will be called for each
 //!     // received packet, with a mutable reference to the associated connection.
-//!     server.recv(|mut com: UdpCommunicatorMut<_, _>| {
+//!     server.recv(|mut com: UdpCommunicatorMut<_, _, _>| {
 //!         if let Some(msg) = com.read_ordered() {
 //!             messages_read += 1;
 //!             match msg {
