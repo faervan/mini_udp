@@ -20,9 +20,9 @@ publish:
 	echo -n "Select [1/2/3] "
 	read line
 	if [[ $line -eq 1 ]]; then
-		next="$((major+1)).$minor.$patch"
+		next="$((major+1)).0.0"
 	elif [[ $line -eq 2 ]]; then
-		next="$major.$((minor+1)).$patch"
+		next="$major.$((minor+1)).0"
 	elif [[ $line -eq 3 ]]; then
 		next="$major.$minor.$((patch+1))"
 	else
@@ -39,6 +39,15 @@ publish:
 	grep -q "$derive_line" Cargo.toml || {
 		echo -e "\nFailed to find derive dependency line"
 		exit 1
+	}
+	echo -n "Have you included all changes in the CHANGELOG? [y/n] "
+	read line
+	if [[ $line != "y" && $line != "Y" ]]; then
+		exit 1
+	fi
+	grep "$next" CHANGELOG.md || {
+		today=$(date +%Y-%m-%d)
+		sed -e "0,/\[Unreleased\]/s//\[Unreleased\]\n\n\#\# \[$next\] - $today/" -i CHANGELOG.md
 	}
 	sed -e "0,/version = \"$version\"/s/version = \"$version\"/version = \"$next\"/" -i Cargo.toml
 	sed -e "0,/$derive_line/s/version = \"$version\"/version = \"$next\"/" -i Cargo.toml
