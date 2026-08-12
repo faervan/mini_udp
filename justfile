@@ -60,7 +60,7 @@ publish:
 	echo -en "\nDo that? [y/n] "
 	read line
 	if [[ $line == "y" || $line == "Y" ]]; then
-		git commit -am \"chore: release v$next\"
+		git commit -am "chore: release v$next"
 		git push
 		cargo publish
 	fi
