@@ -182,22 +182,6 @@ impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> CommunicatorSo
     }
 
     #[inline(always)]
-    fn with_initial_reliable_unordered_resend_delay(mut self, interval: Duration) -> Self {
-        self.socket = self
-            .socket
-            .with_initial_reliable_unordered_resend_delay(interval);
-        self
-    }
-
-    #[inline(always)]
-    fn with_initial_reliable_ordered_resend_delay(mut self, interval: Duration) -> Self {
-        self.socket = self
-            .socket
-            .with_initial_reliable_ordered_resend_delay(interval);
-        self
-    }
-
-    #[inline(always)]
     fn with_max_reliable_unordered_retries(mut self, retries: usize) -> Self {
         self.socket = self.socket.with_max_reliable_unordered_retries(retries);
         self

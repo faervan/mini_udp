@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A `retain` method to the `RingBuffer` implementation. (Run a provided closure on all items,
     and remove all items for which the closure returns `false`).
+- Two new methods on `CommunicatorSocket`: `with_max_reliable_unordered_retries` and
+    `with_max_reliable_ordered_retries` that allow the user to configure the maximum amount
+    of times a packet will be resend. The default is 100.
 
 ## [0.3.1] - 2026-08-11
 

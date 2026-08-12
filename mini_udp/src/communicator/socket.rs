@@ -14,22 +14,6 @@ pub trait CommunicatorSocket {
     ///
     /// The default is 100 milliseconds.
     fn with_reliable_ordered_resend_interval(self, interval: Duration) -> Self;
-    /// Set the delay after which reliable unordered packets are to be resend for the first time if
-    /// no acknowledgement has been received.
-    ///
-    /// This can be viewed as an override of `with_reliable_unordered_resend_interval` for the first
-    /// resend.
-    ///
-    /// The default is 500 milliseconds.
-    fn with_initial_reliable_unordered_resend_delay(self, interval: Duration) -> Self;
-    /// Set the delay after which reliable ordered packets are to be resend for the first time if no
-    /// acknowledgement has been received.
-    ///
-    /// This can be viewed as an override of `with_reliable_ordered_resend_interval` for the first
-    /// resend.
-    ///
-    /// The default is 500 milliseconds.
-    fn with_initial_reliable_ordered_resend_delay(self, interval: Duration) -> Self;
     /// Set the maximum amount of times reliable unordered packets will be resend while no
     /// acknowledgement has been received.
     ///
@@ -56,10 +40,6 @@ pub(crate) struct UdpCommunicatorSocket {
     /// The delay between resends of the packet.
     pub reliable_unordered_resend_interval: Duration,
     pub reliable_ordered_resend_interval: Duration,
-    /// Send packet for the first time, then wait for this period, send again, then resend in the
-    /// interval defined by `reliable_unordered_resend_interval`.
-    pub initial_reliable_unordered_resend_delay: Duration,
-    pub initial_reliable_ordered_resend_delay: Duration,
     /// Maximum amount of times a packet will be resend after the initial send.
     pub max_reliable_unordered_retries: usize,
     pub max_reliable_ordered_retries: usize,
@@ -95,9 +75,6 @@ impl CommunicatorSocket for UdpCommunicatorSocket {
             //
             reliable_unordered_resend_interval: Duration::from_millis(100),
             reliable_ordered_resend_interval: Duration::from_millis(100),
-            // TODO! Make the default smaller?
-            initial_reliable_unordered_resend_delay: Duration::from_millis(500),
-            initial_reliable_ordered_resend_delay: Duration::from_millis(500),
             //
             max_reliable_unordered_retries: 100,
             max_reliable_ordered_retries: 100,
@@ -121,16 +98,6 @@ impl CommunicatorSocket for UdpCommunicatorSocket {
 
     fn with_reliable_ordered_resend_interval(mut self, interval: Duration) -> Self {
         self.reliable_ordered_resend_interval = interval;
-        self
-    }
-
-    fn with_initial_reliable_unordered_resend_delay(mut self, interval: Duration) -> Self {
-        self.initial_reliable_unordered_resend_delay = interval;
-        self
-    }
-
-    fn with_initial_reliable_ordered_resend_delay(mut self, interval: Duration) -> Self {
-        self.initial_reliable_ordered_resend_delay = interval;
         self
     }
 

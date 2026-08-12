@@ -412,16 +412,12 @@ fn flush_messages<SEND: ByteRepr, RECV: ByteRepr>(
                 if ordered { "ordered" } else { "unordered" }
             );
         }
-        let initial_delay = match ordered {
-            true => socket.initial_reliable_ordered_resend_delay,
-            false => socket.initial_reliable_unordered_resend_delay,
-        };
         let remaining_retries = match ordered {
             true => socket.max_reliable_ordered_retries,
             false => socket.max_reliable_unordered_retries,
         };
         send_packets.push(PendingPacket {
-            last_send: Instant::now() - initial_delay,
+            last_send: Instant::now() - Duration::from_hours(1),
             remaining_retries,
             packet,
         });
