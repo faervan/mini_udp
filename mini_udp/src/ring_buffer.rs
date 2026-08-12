@@ -141,6 +141,28 @@ impl<T, const NUM_ITEMS: usize> RingBuffer<T, NUM_ITEMS> {
         }
     }
 
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all items for which `f(id, &mut v)` returns false.
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(u16, &mut T) -> bool,
+    {
+        for index in wrapping_range(
+            self.newest.wrapping_sub(NUM_ITEMS as u16 - 1),
+            self.newest.wrapping_add(1),
+        ) {
+            let i = self.newest.wrapping_sub(index) as usize;
+            let slice_index = index as usize % NUM_ITEMS;
+            if i < NUM_ITEMS
+                && let Some(value) = self.items[slice_index].as_mut()
+                && !f(index, value)
+            {
+                self.items[slice_index].take();
+            }
+        }
+    }
+
     #[inline]
     pub fn push_will_override(&self) -> bool {
         let i = self.newest.wrapping_add(1);
@@ -652,6 +674,39 @@ mod test {
         assert_eq!(ring.len(), 32);
         ring.take(1);
         assert_eq!(ring.len(), 31);
+    }
+
+    #[test]
+    fn retain() {
+        let mut ring = super::RingBuffer::<usize>::new();
+        for i in 0..35 {
+            ring.push(i);
+        }
+        assert_eq!(ring.len(), 32);
+        ring.retain(|_, _| true);
+        assert_eq!(ring.len(), 32);
+
+        let mut iter = ring.values();
+        for i in 0..32 {
+            assert_eq!(iter.next(), Some(&(i + 3)));
+        }
+        assert!(iter.next().is_none());
+
+        ring.retain(|_, _| false);
+        assert_eq!(ring.len(), 0);
+        assert!(ring.is_empty());
+        for i in 0..32 {
+            ring.push(i);
+        }
+        assert_eq!(ring.len(), 32);
+        ring.retain(|id, _| id > 64);
+        assert_eq!(ring.len(), 2);
+
+        let mut iter = ring.values();
+        for i in 30..32 {
+            assert_eq!(iter.next(), Some(&i));
+        }
+        assert!(iter.next().is_none());
     }
 
     #[test]

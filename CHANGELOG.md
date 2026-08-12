@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A `retain` method to the `RingBuffer` implementation. (Run a provided closure on all items,
+    and remove all items for which the closure returns `false`).
+
 ## [0.3.1] - 2026-08-11
 
 ### Fixed
