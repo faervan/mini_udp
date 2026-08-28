@@ -15,9 +15,9 @@ pub(crate) struct InnerUdpCommunicator<CTX: MiniUdpContext> {
     pub ordered_read_packet_head: u16,
     pub unreliable_send_packet_id: u16,
     pub unreliable_send_packets: VecDeque<Packet<CTX::SEND>>,
-    pub reliable_send_queue: VecDeque<CTX::SEND>,
-    pub reliable_ordered_send_queue: VecDeque<CTX::SEND>,
-    pub unreliable_send_queue: VecDeque<CTX::SEND>,
+    pub reliable_send_queue: Vec<CTX::SEND>,
+    pub reliable_ordered_send_queue: Vec<CTX::SEND>,
+    pub unreliable_send_queue: Vec<CTX::SEND>,
     pub unordered_recv_queue: VecDeque<CTX::RECV>,
     pub ordered_recv_queue: VecDeque<CTX::RECV>,
     /// If this is `true`, a packet has been received more than once, potentially meaning that we
@@ -41,9 +41,9 @@ impl<CTX: MiniUdpContext> Default for InnerUdpCommunicator<CTX> {
             ordered_read_packet_head: 0,
             unreliable_send_packet_id: 0,
             unreliable_send_packets: VecDeque::new(),
-            reliable_send_queue: VecDeque::new(),
-            reliable_ordered_send_queue: VecDeque::new(),
-            unreliable_send_queue: VecDeque::new(),
+            reliable_send_queue: Vec::new(),
+            reliable_ordered_send_queue: Vec::new(),
+            unreliable_send_queue: Vec::new(),
             unordered_recv_queue: VecDeque::new(),
             ordered_recv_queue: VecDeque::new(),
             received_packet_duplicate: false,
@@ -341,8 +341,7 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
                     available_bytes -= msg.byte_len();
                     included_msgs += 1;
                 } else {
-                    // TODO! Maybe include other messages here that are small enough, but that
-                    // would make message ordering arbitrary
+                    // TODO! Maybe include other messages here that are small enough
                     break;
                 }
             }
@@ -426,7 +425,7 @@ fn flush_messages<const ORDERED: bool, SEND: ByteRepr, RECV: ByteRepr>(
     send_packets: &mut RingBuffer<PendingPacket<SEND>>,
     reliable_received: &RingBuffer<()>,
     ordered_received: &RingBuffer<Vec<RECV>>,
-    send_queue: &mut VecDeque<SEND>,
+    send_queue: &mut Vec<SEND>,
 ) {
     while !send_packets.push_will_override() && !send_queue.is_empty() {
         let mut available_bytes = MAX_PACKET_DATA_LEN;

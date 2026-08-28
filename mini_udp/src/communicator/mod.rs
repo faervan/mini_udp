@@ -135,17 +135,17 @@ impl<CTX: MiniUdpContext> Default for UdpCommunicator<CTX> {
 impl<CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicator<CTX> {
     #[inline(always)]
     fn write(&mut self, message: CTX::SEND) {
-        self.inner.unreliable_send_queue.push_back(message);
+        self.inner.unreliable_send_queue.push(message);
     }
 
     #[inline(always)]
     fn write_reliable(&mut self, message: CTX::SEND) {
-        self.inner.reliable_send_queue.push_back(message);
+        self.inner.reliable_send_queue.push(message);
     }
 
     #[inline(always)]
     fn write_ordered(&mut self, message: CTX::SEND) {
-        self.inner.reliable_ordered_send_queue.push_back(message);
+        self.inner.reliable_ordered_send_queue.push(message);
     }
 
     #[inline(always)]
@@ -185,17 +185,17 @@ impl<CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicator<CTX> {
 impl<'a, CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicatorMut<'a, CTX> {
     #[inline(always)]
     fn write(&mut self, message: CTX::SEND) {
-        self.inner.unreliable_send_queue.push_back(message);
+        self.inner.unreliable_send_queue.push(message);
     }
 
     #[inline(always)]
     fn write_reliable(&mut self, message: CTX::SEND) {
-        self.inner.reliable_send_queue.push_back(message);
+        self.inner.reliable_send_queue.push(message);
     }
 
     #[inline(always)]
     fn write_ordered(&mut self, message: CTX::SEND) {
-        self.inner.reliable_ordered_send_queue.push_back(message);
+        self.inner.reliable_ordered_send_queue.push(message);
     }
 
     #[inline(always)]

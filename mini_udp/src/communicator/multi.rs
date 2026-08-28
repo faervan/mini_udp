@@ -265,7 +265,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
         CTX::SEND: Clone,
     {
         for com in self.coms.values_mut() {
-            com.reliable_send_queue.push_back(message.clone());
+            com.reliable_send_queue.push(message.clone());
         }
     }
 
@@ -274,7 +274,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
         CTX::SEND: Clone,
     {
         for (_, com) in self.coms.iter_mut().filter(|(addr, _)| **addr != exception) {
-            com.reliable_send_queue.push_back(message.clone());
+            com.reliable_send_queue.push(message.clone());
         }
     }
 
