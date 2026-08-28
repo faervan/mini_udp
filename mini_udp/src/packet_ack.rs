@@ -1,4 +1,4 @@
-use crate::{packet::Packet, prelude::*, ring_buffer::RingBuffer};
+use crate::{prelude::*, ring_buffer::RingBuffer};
 
 #[derive(Debug, ByteRepr)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -34,7 +34,7 @@ impl PacketAck {
     pub(super) fn new<RECV: ByteRepr>(
         sequence_id: u16,
         reliable_received: &RingBuffer<()>,
-        ordered_received: &RingBuffer<Packet<RECV>>,
+        ordered_received: &RingBuffer<Vec<RECV>>,
     ) -> Self {
         let mut reliable_ack_bits = 0;
         let reliable_newest_received = reliable_received.get_newest_index();

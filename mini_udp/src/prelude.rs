@@ -5,7 +5,7 @@ pub use crate::communicator::*;
 pub use crate::context::{MiniUdpContext, UdpContext};
 
 pub(crate) use crate::communicator::{InnerUdpCommunicator, UdpCommunicatorSocket};
-pub(crate) use crate::packet::{MAX_PACKET_DATA_LEN, MAX_PACKET_LEN, Packet};
+pub(crate) use crate::packet::{MAX_PACKET_DATA_LEN, MAX_PACKET_LEN, Packet, PacketType};
 pub(crate) use crate::packet_ack::PacketAck;
 
 pub(crate) use std::time::{Duration, Instant};

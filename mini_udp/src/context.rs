@@ -39,6 +39,8 @@ pub trait MiniUdpContext {
     type RECV: ByteRepr;
     const PROTOCOL_VERSION: u32;
 
+    /// Reverse the `SEND` and `RECV` parameters, to represent the context of the connected
+    /// communicator instead (which should receive what this sends, and send what this receives).
     type REVERSE: MiniUdpContext;
 }
 
