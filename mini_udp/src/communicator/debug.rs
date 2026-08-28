@@ -26,12 +26,7 @@ pub trait MiniUdpDebugExt {
     fn with_debug_logs(self) -> Self;
 }
 
-impl<SEND, RECV, const PROTOCOL_VERSION: u32> MiniUdpDebugExt
-    for UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
-where
-    SEND: ByteRepr,
-    RECV: ByteRepr,
-{
+impl<CTX: MiniUdpContext> MiniUdpDebugExt for UdpCommunicator<CTX> {
     #[inline(always)]
     fn with_fake_drop(mut self, drop_probability: f64) -> Self {
         self.socket = self.socket.with_fake_drop(drop_probability);
@@ -57,12 +52,7 @@ where
     }
 }
 
-impl<SEND, RECV, const PROTOCOL_VERSION: u32> MiniUdpDebugExt
-    for MultiUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
-where
-    SEND: ByteRepr,
-    RECV: ByteRepr,
-{
+impl<CTX: MiniUdpContext> MiniUdpDebugExt for MultiUdpCommunicator<CTX> {
     #[inline(always)]
     fn with_fake_drop(mut self, drop_probability: f64) -> Self {
         self.socket = self.socket.with_fake_drop(drop_probability);

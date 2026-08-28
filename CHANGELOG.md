@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced generic `SEND`, `RECV` and `const PROTOCOL_VERSION` parameters to a single
+    `CTX` that bundles all other generics in the new `MiniUdpContext` trait to
+    reduce repetition of the generics and simplify adding more generics later on.
+
 ## [0.4.0] - 2026-08-13
 
 ### Added

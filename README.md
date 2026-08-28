@@ -53,13 +53,16 @@ enum MessageToClient {
 /// The protocol version is used as seed for the CRC algorithm. Thus, when receiving a packet
 /// that was send from a communicator with a different version, the CRC check will fail.
 const PROTOCOL_VERSION: u32 = 1;
+type ClientCtx = UdpContext<MessageToServer, MessageToClient, PROTOCOL_VERSION>;
+type ServerCtx = <ClientCtx as MiniUdpContext>::REVERSE;
+
 const POSITION: [f32; 3] = [-1., 0.004, 2482.3];
 
-let mut server = MultiUdpCommunicator::<_, _, PROTOCOL_VERSION>::bind("0.0.0.0:7001");
+let mut server = MultiUdpCommunicator::<ServerCtx>::bind("0.0.0.0:7001");
 // `UdpCommunicator::default()` binds the communicator to "0.0.0.0:0", which lets the OS decide
 // which port to use.
 let mut client =
-    UdpCommunicator::<_, _, PROTOCOL_VERSION>::default().connect("0.0.0.0:7001").unwrap();
+    UdpCommunicator::<ClientCtx>::default().connect("0.0.0.0:7001").unwrap();
 
 // The `write*` methods only add the message to a queue, they won't be send until you explicitly
 // call `send()`.
@@ -72,7 +75,7 @@ loop {
     client.send().unwrap();
     // Receive all new packets. You can provide a callback function that will be called for each
     // received packet, with a mutable reference to the associated connection.
-    server.recv(|mut com: UdpCommunicatorMut<_, _, _>| {
+    server.recv(|mut com: UdpCommunicatorMut<_>| {
         if let Some(msg) = com.read_ordered() {
             messages_read += 1;
             match msg {

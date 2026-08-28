@@ -1,17 +1,19 @@
 expand:
 	cargo expand --lib -p mini_udp --tests
-publish:
+ci:
+	cargo doc --all-features --config build.warnings=\"deny\"
+	cargo doc --no-default-features --config build.warnings=\"deny\"
+	cargo clippy --all-targets --all-features --config build.warnings=\"deny\"
+	cargo clippy --all-targets --no-default-features --config build.warnings=\"deny\"
+	cargo test --all-features --config build.warnings=\"deny\"
+	cargo test --no-default-features --config build.warnings=\"deny\"
+	cargo rdme -w mini_udp
+publish: ci
 	#!/bin/sh
 	version=$(sed -e '1,/\[workspace.package\]/d' -e '/^version =/q' Cargo.toml | cut -d \" -f 2)
 	major=$(echo $version | cut -d . -f 1)
 	minor=$(echo $version | cut -d . -f 2)
 	patch=$(echo $version | cut -d . -f 3)
-	cargo doc --all-features --config build.warnings=\"deny\" || exit 1
-	cargo doc --no-default-features --config build.warnings=\"deny\" || exit 1
-	cargo clippy --all-targets --all-features --config build.warnings=\"deny\" || exit 1
-	cargo clippy --all-targets --no-default-features --config build.warnings=\"deny\" || exit 1
-	cargo test --all-features --config build.warnings=\"deny\" || exit 1
-	cargo test --no-default-features --config build.warnings=\"deny\" || exit 1
 	echo "Current version is $major.$minor.$patch"
 	echo "You can make a"
 	echo "  [1] Major update"
@@ -34,7 +36,7 @@ publish:
 	if [[ $line != "y" && $line != "Y" ]]; then
 		exit 1
 	fi
-	cargo rdme -w mini_udp || exit 1
+	cargo rdme -w mini_udp
 	derive_line="mini_udp_derive = { path = \"derive\", version = \"$version\" }"
 	grep -q "$derive_line" Cargo.toml || {
 		echo -e "\nFailed to find derive dependency line"

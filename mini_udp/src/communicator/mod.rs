@@ -17,21 +17,21 @@ mod debug;
 #[cfg_attr(docsrs, doc(cfg(feature = "debug")))]
 pub use debug::MiniUdpDebugExt;
 
-pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
+pub trait Communicator<CTX: MiniUdpContext> {
     /// Queue a message to be send unreliably.
-    fn write(&mut self, message: SEND);
+    fn write(&mut self, message: CTX::SEND);
     /// Queue a message to be send reliably, but not necessarily in order.
-    fn write_reliable(&mut self, message: SEND);
+    fn write_reliable(&mut self, message: CTX::SEND);
     /// Queue a message to be send reliably, in order. The receiver will make sure not to show this
     /// message before any previously send, ordered messages.
-    fn write_ordered(&mut self, message: SEND);
+    fn write_ordered(&mut self, message: CTX::SEND);
     /// Add a heartbeat to the internal send queue. This behaves like the other `write*` methods,
     /// it does not actually send the packet yet.
     fn write_heartbeat(&mut self);
     /// Try to read the next unreliable or reliable-unordered message received.
-    fn read(&mut self) -> Option<RECV>;
+    fn read(&mut self) -> Option<CTX::RECV>;
     /// Try to read the reliable-ordered message received.
-    fn read_ordered(&mut self) -> Option<RECV>;
+    fn read_ordered(&mut self) -> Option<CTX::RECV>;
     /// Returns `true` if there are any pending messages to be send / packets to get acknowledged.
     fn has_work(&self) -> bool;
     /// Returns the [Instant] of time at which the last packet has been received.
@@ -54,16 +54,18 @@ pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
 /// use std::borrow::Cow;
 ///
 /// const PROTOCOL_VERSION: u32 = 2;
+/// type SenderCtx<'a> = UdpContext<Message<'a>, (), PROTOCOL_VERSION>;
+/// type ReceiverCtx<'a> = <SenderCtx<'a> as MiniUdpContext>::REVERSE;
 ///
 /// #[derive(ByteRepr, Debug, PartialEq)]
 /// struct Message<'a>(Cow<'a, str>);
 ///
 /// let mut com1 =
-///     UdpCommunicator::<_, (), PROTOCOL_VERSION>::bind("0.0.0.0:7002")
+///     UdpCommunicator::<SenderCtx>::bind("0.0.0.0:7002")
 ///         .connect("0.0.0.0:7003")
 ///         .unwrap();
 /// let mut com2 =
-///     UdpCommunicator::<(), _, PROTOCOL_VERSION>::bind("0.0.0.0:7003")
+///     UdpCommunicator::<ReceiverCtx>::bind("0.0.0.0:7003")
 ///         .connect("0.0.0.0:7002")
 ///         .unwrap();
 /// let message = "hello udp";
@@ -72,14 +74,12 @@ pub trait Communicator<SEND: ByteRepr, RECV: ByteRepr> {
 /// com2.recv();
 /// assert_eq!(com2.read(), Some(Message(Cow::Owned(String::from(message)))));
 /// ```
-pub struct UdpCommunicator<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> {
+pub struct UdpCommunicator<CTX: MiniUdpContext> {
     socket: UdpCommunicatorSocket,
-    pub(super) inner: InnerUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>,
+    pub(super) inner: InnerUdpCommunicator<CTX>,
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> CommunicatorSocket
-    for UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
-{
+impl<CTX: MiniUdpContext> CommunicatorSocket for UdpCommunicator<CTX> {
     /// Create a new [`UdpCommunicator`], binding it to the provided `addr`.
     fn bind<A: ToSocketAddrs>(addr: A) -> Self {
         Self {
@@ -116,16 +116,14 @@ impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> CommunicatorSo
 }
 
 /// A connection of an [`MultiUdpCommunicator`].
-pub struct UdpCommunicatorMut<'a, SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> {
+pub struct UdpCommunicatorMut<'a, CTX: MiniUdpContext> {
     #[cfg(feature = "debug")]
     socket: &'a UdpCommunicatorSocket,
     pub addr: SocketAddr,
-    inner: &'a mut InnerUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>,
+    inner: &'a mut InnerUdpCommunicator<CTX>,
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Default
-    for UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
-{
+impl<CTX: MiniUdpContext> Default for UdpCommunicator<CTX> {
     fn default() -> Self {
         Self {
             socket: UdpCommunicatorSocket::bind("0.0.0.0:0"),
@@ -134,21 +132,19 @@ impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Default
     }
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Communicator<SEND, RECV>
-    for UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
-{
+impl<CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicator<CTX> {
     #[inline(always)]
-    fn write(&mut self, message: SEND) {
+    fn write(&mut self, message: CTX::SEND) {
         self.inner.unreliable_send_queue.push_back(message);
     }
 
     #[inline(always)]
-    fn write_reliable(&mut self, message: SEND) {
+    fn write_reliable(&mut self, message: CTX::SEND) {
         self.inner.reliable_send_queue.push_back(message);
     }
 
     #[inline(always)]
-    fn write_ordered(&mut self, message: SEND) {
+    fn write_ordered(&mut self, message: CTX::SEND) {
         self.inner.reliable_ordered_send_queue.push_back(message);
     }
 
@@ -161,12 +157,12 @@ impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Communicator<S
     }
 
     #[inline(always)]
-    fn read(&mut self) -> Option<RECV> {
+    fn read(&mut self) -> Option<CTX::RECV> {
         self.inner.unordered_recv_queue.pop_front()
     }
 
     #[inline(always)]
-    fn read_ordered(&mut self) -> Option<RECV> {
+    fn read_ordered(&mut self) -> Option<CTX::RECV> {
         self.inner.ordered_recv_queue.pop_front()
     }
 
@@ -186,21 +182,19 @@ impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Communicator<S
     }
 }
 
-impl<'a, SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Communicator<SEND, RECV>
-    for UdpCommunicatorMut<'a, SEND, RECV, PROTOCOL_VERSION>
-{
+impl<'a, CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicatorMut<'a, CTX> {
     #[inline(always)]
-    fn write(&mut self, message: SEND) {
+    fn write(&mut self, message: CTX::SEND) {
         self.inner.unreliable_send_queue.push_back(message);
     }
 
     #[inline(always)]
-    fn write_reliable(&mut self, message: SEND) {
+    fn write_reliable(&mut self, message: CTX::SEND) {
         self.inner.reliable_send_queue.push_back(message);
     }
 
     #[inline(always)]
-    fn write_ordered(&mut self, message: SEND) {
+    fn write_ordered(&mut self, message: CTX::SEND) {
         self.inner.reliable_ordered_send_queue.push_back(message);
     }
 
@@ -213,12 +207,12 @@ impl<'a, SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Communicat
     }
 
     #[inline(always)]
-    fn read(&mut self) -> Option<RECV> {
+    fn read(&mut self) -> Option<CTX::RECV> {
         self.inner.unordered_recv_queue.pop_front()
     }
 
     #[inline(always)]
-    fn read_ordered(&mut self) -> Option<RECV> {
+    fn read_ordered(&mut self) -> Option<CTX::RECV> {
         self.inner.ordered_recv_queue.pop_front()
     }
 
@@ -238,9 +232,7 @@ impl<'a, SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Communicat
     }
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
-    UdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
-{
+impl<CTX: MiniUdpContext> UdpCommunicator<CTX> {
     #[inline(always)]
     /// Connect to the provided `addr`.
     ///
@@ -277,16 +269,9 @@ impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
 }
 
 #[cfg(test)]
-pub(crate) fn test_init<SEND, RECV>(
+pub(crate) fn test_init<CTX: MiniUdpContext>(
     port_offset: u16,
-) -> (
-    UdpCommunicator<SEND, RECV, 1>,
-    UdpCommunicator<SEND, RECV, 1>,
-)
-where
-    SEND: ByteRepr,
-    RECV: ByteRepr,
-{
+) -> (UdpCommunicator<CTX>, UdpCommunicator<CTX>) {
     let _ = tracing_subscriber::FmtSubscriber::builder()
         .with_test_writer()
         .with_max_level(tracing::Level::DEBUG)
@@ -295,12 +280,8 @@ where
     let localhost = std::net::IpAddr::V4(localhost);
     let addr1 = std::net::SocketAddr::new(localhost, port_offset);
     let addr2 = std::net::SocketAddr::new(localhost, port_offset + 1);
-    let com1 = UdpCommunicator::<SEND, RECV, _>::bind(addr1)
-        .connect(addr2)
-        .unwrap();
-    let com2 = UdpCommunicator::<SEND, RECV, _>::bind(addr2)
-        .connect(addr1)
-        .unwrap();
+    let com1 = UdpCommunicator::<CTX>::bind(addr1).connect(addr2).unwrap();
+    let com2 = UdpCommunicator::<CTX>::bind(addr2).connect(addr1).unwrap();
     (com1, com2)
 }
 
@@ -312,9 +293,11 @@ mod test {
 
     use crate::{packet::test::InnerUdpMessage, prelude::*};
 
+    type UdpCtx = UdpContext<InnerUdpMessage, InnerUdpMessage, 0>;
+
     #[test]
     fn packet_roundtrip() {
-        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7200);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7200);
         let m1 = InnerUdpMessage::Hello;
         let m2 = InnerUdpMessage::Wave(1394);
         com2.write(m1);
@@ -328,7 +311,7 @@ mod test {
 
     #[test]
     fn send_until_ack() {
-        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7202);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7202);
         let m1 = InnerUdpMessage::Hello;
         com2.write_reliable(m1);
         com2.tick().unwrap();
@@ -351,7 +334,7 @@ mod test {
 
     #[test]
     fn test_reliability() {
-        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7204);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7204);
         #[cfg(feature = "debug")]
         {
             com1.socket = com1
@@ -386,7 +369,7 @@ mod test {
 
     #[test]
     fn test_ordered_reliability() {
-        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7206);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7206);
         #[cfg(feature = "debug")]
         {
             com1.socket = com1
@@ -424,7 +407,7 @@ mod test {
     #[test]
     #[cfg(feature = "debug")]
     fn test_fake_delay() {
-        let (mut com1, mut com2) = super::test_init::<InnerUdpMessage, InnerUdpMessage>(7208);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7208);
         com1.socket = com1.socket.with_debug_logs();
         com2.socket = com2.socket.with_fake_delay(70..80);
         let msg = InnerUdpMessage::Wave(u16::MAX);
@@ -452,10 +435,10 @@ mod test {
             .with_test_writer()
             .with_max_level(tracing::Level::DEBUG)
             .try_init();
-        let mut multi_com = MultiUdpCommunicator::<(), isize, 1>::bind("0.0.0.0:7210")
+        let mut multi_com = MultiUdpCommunicator::<UdpContext<(), isize, 1>>::bind("0.0.0.0:7210")
             .with_debug_logs()
             .with_fake_delay(25..26);
-        let mut com = UdpCommunicator::<isize, (), 1>::default()
+        let mut com = UdpCommunicator::<UdpContext<isize, (), 1>>::default()
             .connect("0.0.0.0:7210")
             .unwrap();
         let msg = -240_594;
@@ -467,7 +450,7 @@ mod test {
             use std::thread::sleep;
 
             sleep(Duration::from_millis(1));
-            multi_com.recv(|mut com: UdpCommunicatorMut<_, _, 1>| {
+            multi_com.recv(|mut com: UdpCommunicatorMut<_>| {
                 assert_eq!(com.read_ordered().unwrap(), msg);
                 assert!(start.elapsed().as_millis() > 24);
                 assert!(start.elapsed().as_millis() < 28);
@@ -481,10 +464,10 @@ mod test {
 
     #[test]
     fn test_protocol_version_check() {
-        let mut com1 = UdpCommunicator::<String, (), 1>::default()
+        let mut com1 = UdpCommunicator::<UdpContext<String, (), 1>>::default()
             .connect("0.0.0.0:7212")
             .unwrap();
-        let mut com2 = UdpCommunicator::<(), String, 2>::bind("0.0.0.0:7212");
+        let mut com2 = UdpCommunicator::<UdpContext<(), String, 2>>::bind("0.0.0.0:7212");
         com1.write(String::from("Can you hear me?"));
         com1.send().unwrap();
         com2.recv();

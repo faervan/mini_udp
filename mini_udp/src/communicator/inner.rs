@@ -6,21 +6,20 @@ use crate::{
     ring_buffer::{RingBuffer, wrapping_gt},
 };
 
-pub(crate) struct InnerUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
-{
-    pub reliable_send_packets: RingBuffer<PendingPacket<SEND>>,
-    pub reliable_ordered_send_packets: RingBuffer<PendingPacket<SEND>>,
+pub(crate) struct InnerUdpCommunicator<CTX: MiniUdpContext> {
+    pub reliable_send_packets: RingBuffer<PendingPacket<CTX::SEND>>,
+    pub reliable_ordered_send_packets: RingBuffer<PendingPacket<CTX::SEND>>,
     pub reliable_received_packets: RingBuffer<()>,
-    pub reliable_ordered_received_packets: RingBuffer<Packet<RECV>>,
+    pub reliable_ordered_received_packets: RingBuffer<Packet<CTX::RECV>>,
     /// The sequence id of the next ordered packet to be read
     pub ordered_read_packet_head: u16,
     pub unreliable_send_packet_id: u16,
-    pub unreliable_send_packets: VecDeque<Packet<SEND>>,
-    pub reliable_send_queue: VecDeque<SEND>,
-    pub reliable_ordered_send_queue: VecDeque<SEND>,
-    pub unreliable_send_queue: VecDeque<SEND>,
-    pub unordered_recv_queue: VecDeque<RECV>,
-    pub ordered_recv_queue: VecDeque<RECV>,
+    pub unreliable_send_packets: VecDeque<Packet<CTX::SEND>>,
+    pub reliable_send_queue: VecDeque<CTX::SEND>,
+    pub reliable_ordered_send_queue: VecDeque<CTX::SEND>,
+    pub unreliable_send_queue: VecDeque<CTX::SEND>,
+    pub unordered_recv_queue: VecDeque<CTX::RECV>,
+    pub ordered_recv_queue: VecDeque<CTX::RECV>,
     /// If this is `true`, a packet has been received more than once, potentially meaning that we
     /// have to send an ack to the other side.
     pub received_packet_duplicate: bool,
@@ -32,9 +31,7 @@ pub(crate) struct InnerUdpCommunicator<SEND: ByteRepr, RECV: ByteRepr, const PRO
     pub received_ordered_packet_ids: std::collections::HashSet<u16>,
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32> Default
-    for InnerUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
-{
+impl<CTX: MiniUdpContext> Default for InnerUdpCommunicator<CTX> {
     fn default() -> Self {
         Self {
             reliable_send_packets: RingBuffer::new(),
@@ -66,14 +63,12 @@ pub(crate) struct PendingPacket<SEND: ByteRepr> {
     packet: Packet<SEND>,
 }
 
-impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
-    InnerUdpCommunicator<SEND, RECV, PROTOCOL_VERSION>
-{
+impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
     /// [`crc::CRC_32_BZIP2`] with `init` set to [`PROTOCOL_VERSION`]
     const CRC_ALGORITHM: crc::Algorithm<u32> = crc::Algorithm {
         width: 32,
         poly: 0x04c11db7,
-        init: PROTOCOL_VERSION,
+        init: CTX::PROTOCOL_VERSION,
         refin: false,
         refout: false,
         xorout: 0xffffffff,
@@ -133,7 +128,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
 
     pub fn read_packet(&mut self, n: usize, socket: &mut UdpCommunicatorSocket) {
         #[cfg(feature = "debug")]
-        let packet = Packet::<RECV>::from_bytes(&socket.data_buffer[4..n])
+        let packet = Packet::<CTX::RECV>::from_bytes(&socket.data_buffer[4..n])
             .unwrap()
             .ack
             .sequence_id;
@@ -159,7 +154,7 @@ impl<SEND: ByteRepr, RECV: ByteRepr, const PROTOCOL_VERSION: u32>
             warn!("CRC check failed, packet: {packet:#?}");
             return;
         }
-        match Packet::<RECV>::from_bytes(&socket.data_buffer[4..n]) {
+        match Packet::<CTX::RECV>::from_bytes(&socket.data_buffer[4..n]) {
             Ok(packet) => {
                 #[cfg(feature = "debug")]
                 // Fake UDP unreliability
