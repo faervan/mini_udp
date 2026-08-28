@@ -106,8 +106,30 @@ derive_for!(isize);
 derive_for!(u128);
 derive_for!(i128);
 derive_for!(String);
+derive_for!(Box<T>, <T> where T: ByteRepr);
 derive_for!(std::borrow::Cow<'a, T>, <'a, T> where T: ByteRepr + ToOwned<Owned = T>);
 derive_for!(std::borrow::Cow<'a, str>, <'a>);
 derive_for!(Option<T>, <T> where T: ByteRepr);
 derive_for!([T; N], <T, const N: usize> where T: ByteRepr + Default);
 derive_for!(Vec<T>, <T> where T: ByteRepr);
+
+impl<T> StaticByteRepr for Box<T>
+where
+    T: StaticByteRepr,
+{
+    const BYTE_LEN: usize = T::BYTE_LEN;
+}
+
+impl<'a, T> StaticByteRepr for std::borrow::Cow<'a, T>
+where
+    T: StaticByteRepr + ToOwned<Owned = T>,
+{
+    const BYTE_LEN: usize = T::BYTE_LEN;
+}
+
+impl<T, const N: usize> StaticByteRepr for [T; N]
+where
+    T: StaticByteRepr,
+{
+    const BYTE_LEN: usize = T::BYTE_LEN * N;
+}

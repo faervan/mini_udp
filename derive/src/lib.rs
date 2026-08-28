@@ -54,17 +54,9 @@ pub fn derive_byte_repr(token_input: TokenStream) -> TokenStream {
                 #f_len
             }
             fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<(), ::mini_udp::ByteReprError> {
-                #[cfg(debug_assertions)]
-                if cfg!(debug_assertions) && Self::MIN_BYTE_LEN == 0 {
-                    ::mini_udp::tracing::warn!("Serializing a zero-sized type is not meaningful!");
-                }
                 #f_write_to_bytes
             }
             fn from_bytes(bytes: &[u8]) -> Result<Self, ::mini_udp::ByteReprError> {
-                #[cfg(debug_assertions)]
-                if cfg!(debug_assertions) && Self::MIN_BYTE_LEN == 0 {
-                    ::mini_udp::tracing::warn!("Deserializing a zero-sized type is not meaningful!");
-                }
                 #f_from_bytes
             }
         }

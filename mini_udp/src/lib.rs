@@ -623,6 +623,186 @@ mod test {
     }
 
     #[test]
+    fn box_simple() {
+        macro_rules! test_simple_box {
+            ($ty:ident, $len:expr) => {
+                assert_eq!($ty::BYTE_LEN, $len);
+                assert_eq!($ty::BYTE_LEN, $ty::MIN_BYTE_LEN);
+                assert_eq!($ty::BYTE_LEN, $ty::MAX_BYTE_LEN);
+
+                crate::test_bitrepr_roundtrip!(v, $ty, $ty(Box::new(rand::random())));
+                crate::test_bitrepr_roundtrip!(v, $ty, $ty(Box::new(rand::random())));
+                crate::test_bitrepr_roundtrip!(v, $ty, $ty(Box::new(rand::random())));
+            };
+            ($ty:ident, STATIC: $len:expr, $value:expr) => {
+                assert_eq!($ty::BYTE_LEN, $len);
+                assert_eq!($ty::BYTE_LEN, $ty::MIN_BYTE_LEN);
+                assert_eq!($ty::BYTE_LEN, $ty::MAX_BYTE_LEN);
+
+                crate::test_bitrepr_roundtrip!(v, $ty, $ty(Box::new($value)));
+            };
+            ($ty:ident, $len:expr, $value:expr) => {
+                let v = $ty(Box::new($value.into()));
+                assert_eq!(v.byte_len(), $len);
+
+                crate::test_bitrepr_roundtrip!(x, $ty, v);
+            };
+        }
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct A(Box<u8>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct B(Box<i8>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct C(Box<u16>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct D(Box<i16>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct E(Box<u32>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct F(Box<i32>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct G(Box<u64>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct H(Box<i64>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct I(Box<u128>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct J(Box<i128>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct K(Box<usize>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct L(Box<isize>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct M(Box<f32>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct N(Box<f64>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct O(Box<bool>);
+
+        test_simple_box!(A, 1);
+        test_simple_box!(B, 1);
+        test_simple_box!(C, 2);
+        test_simple_box!(D, 2);
+        test_simple_box!(E, 4);
+        test_simple_box!(F, 4);
+        test_simple_box!(G, 8);
+        test_simple_box!(H, 8);
+        test_simple_box!(I, 16);
+        test_simple_box!(J, 16);
+        test_simple_box!(
+            K,
+            STATIC: std::mem::size_of::<usize>(),
+            rand::random::<u32>() as usize
+        );
+        test_simple_box!(
+            L,
+            STATIC: std::mem::size_of::<isize>(),
+            rand::random::<i32>() as isize
+        );
+        test_simple_box!(M, 4);
+        test_simple_box!(N, 8);
+        test_simple_box!(O, 1);
+
+        #[derive(ByteRepr, PartialEq, Debug)]
+        #[allow(clippy::box_collection)]
+        struct AA(Box<String>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct AB<'a>(Box<Cow<'a, str>>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        #[allow(clippy::redundant_allocation)]
+        struct AC(Box<Box<f64>>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        #[allow(clippy::box_collection)]
+        struct AD(Box<Option<Box<String>>>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct AE(Box<Option<String>>);
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct AF(Box<Option<usize>>);
+
+        test_simple_box!(AA, 9, "hello");
+        test_simple_box!(AB, 9, "world");
+        test_simple_box!(AC, 8, Box::new(-274.19401));
+        test_simple_box!(AD, 1, None);
+        test_simple_box!(AD, 10, Some(Box::new(String::from("hello"))));
+        test_simple_box!(AE, 8, Some(String::from("abc")));
+        test_simple_box!(AF, 1, None);
+        test_simple_box!(AF, 1 + std::mem::size_of::<usize>(), Some(usize::MAX - 22));
+    }
+
+    #[test]
+    fn boxed() {
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct A {
+            a: String,
+            b: Box<u32>,
+            c: f64,
+        }
+        #[derive(ByteRepr, PartialEq, Debug)]
+        #[allow(clippy::box_collection)]
+        struct B {
+            a: u8,
+            b: Box<String>,
+            c: String,
+        }
+        #[derive(ByteRepr, PartialEq, Debug)]
+        struct C {
+            a: u64,
+            b: Box<u32>,
+            c: f64,
+            d: Box<i8>,
+        }
+        #[derive(ByteRepr, PartialEq, Debug)]
+        #[allow(clippy::redundant_allocation)]
+        struct D {
+            a: Box<Option<bool>>,
+            b: String,
+            c: Box<Box<usize>>,
+            d: Box<i16>,
+            e: f32,
+        }
+
+        crate::test_bitrepr_roundtrip!(
+            a,
+            A,
+            A {
+                a: String::from("horvdb"),
+                b: Box::new(4_030_893),
+                c: -843_384_213.
+            }
+        );
+        crate::test_bitrepr_roundtrip!(
+            b,
+            B,
+            B {
+                a: 125,
+                b: Box::new(String::from("slf284")),
+                c: String::from("so many strings")
+            }
+        );
+        crate::test_bitrepr_roundtrip!(
+            c,
+            C,
+            C {
+                a: u64::MAX - 274,
+                b: Box::new(774),
+                c: 364.28,
+                d: Box::new(-50)
+            }
+        );
+        crate::test_bitrepr_roundtrip!(
+            d,
+            D,
+            D {
+                a: Box::new(Some(false)),
+                b: String::from("more strings"),
+                c: Box::new(Box::new(9999)),
+                d: Box::new(-30_000),
+                e: 33. / 10.2
+            }
+        );
+    }
+
+    #[test]
     fn cow() {
         #[derive(ByteRepr, PartialEq, Debug)]
         #[allow(clippy::owned_cow)]

@@ -52,12 +52,21 @@ impl Field {
         self
     }
 
+    fn with_value(&self, value: Value) -> Self {
+        Self {
+            byte_offset: self.byte_offset,
+            ident: self.ident.clone(),
+            value,
+            use_variable_field_access: self.use_variable_field_access,
+        }
+    }
+
     pub fn read_fixed_part(&self) -> TokenStream2 {
         let length = self.length();
         let ident = self.ident.as_tokens(true);
-        match self.value {
+        match &self.value {
             Value::EmptyTuple => return quote! {let #ident = ();},
-            Value::Cow { .. } => return quote! {},
+            Value::Box { .. } | Value::Cow { .. } => return quote! {},
             _ => {}
         }
         if length.fixed_bytes == 1 || matches!(self.value, Value::Option { .. }) {
@@ -98,7 +107,10 @@ impl Field {
 
     pub fn read_variable_part(&self) -> TokenStream2 {
         if self.length().is_static()
-            && !matches!(self.value, Value::Cow { .. } | Value::Option { .. })
+            && !matches!(
+                self.value,
+                Value::Box { .. } | Value::Cow { .. } | Value::Option { .. }
+            )
         {
             return quote! {};
         }
@@ -117,6 +129,16 @@ impl Field {
                         &bytes[byte_ptr..byte_ptr + #fixed_ident]
                     ).into_owned();
                     byte_ptr += #fixed_ident;
+                }
+            }
+            Value::Box { ty } => {
+                let inner = self.with_value((**ty).clone());
+                let fixed_inner = inner.read_fixed_part();
+                let variable_inner = inner.read_variable_part();
+                quote! {
+                    #fixed_inner
+                    #variable_inner
+                    let #ident = Box::new(#ident);
                 }
             }
             Value::Cow { ty } => {
@@ -189,8 +211,12 @@ impl Field {
         }
     }
 
+    // This is actually a nightmare
     pub fn write_fixed_part(&self) -> TokenStream2 {
-        if let Value::EmptyTuple = self.value {
+        if matches!(
+            self.value,
+            Value::EmptyTuple | Value::Box { .. } | Value::Cow { .. }
+        ) {
             return quote! {};
         }
         let ident = self.ident.as_tokens(false);
@@ -220,7 +246,7 @@ impl Field {
             true => ident,
             false => match self.value {
                 Value::String { .. } | Value::Vec { .. } => quote! {(#ident.len() as u32)},
-                Value::Array { .. } | Value::Cow { .. } | Value::Delegated { .. } => {
+                Value::Array { .. } | Value::Delegated { .. } => {
                     return quote! {};
                 }
                 _ => unreachable!(),
@@ -234,7 +260,10 @@ impl Field {
 
     pub fn write_variable_part(&self) -> TokenStream2 {
         if self.length().is_static()
-            && !matches!(self.value, Value::Cow { .. } | Value::Option { .. })
+            && !matches!(
+                self.value,
+                Value::Box { .. } | Value::Cow { .. } | Value::Option { .. }
+            )
         {
             return quote! {};
         }
@@ -254,9 +283,18 @@ impl Field {
                     byte_ptr += #ident.len();
                 }
             }
+            Value::Box { ty } => {
+                let inner_identifier = FieldIdentifier::Access(quote! {#ident.as_ref()});
+                let inner = self.copy_with(inner_identifier, (**ty).clone());
+                let fixed_inner = inner.write_fixed_part();
+                let variable_inner = inner.write_variable_part();
+                quote! {
+                    #fixed_inner
+                    #variable_inner
+                }
+            }
             Value::Cow { ty } => {
-                let inner_identifier =
-                    FieldIdentifier::Access(quote! {std::borrow::Borrow::<#ty>::borrow(#ident)});
+                let inner_identifier = FieldIdentifier::Access(quote! {#ident.as_ref()});
                 let inner = self.copy_with(inner_identifier, (**ty).clone());
                 let fixed_inner = inner.write_fixed_part();
                 let variable_inner = inner.write_variable_part();
@@ -377,8 +415,13 @@ pub enum Value {
     )]
     String { max_length: usize, is_str: bool },
     #[assoc(
-        name = quote! {Cow<#_ty>}.to_token_stream(),
-        length = _ty.length(field),
+        name = quote! {Box<#_ty>},
+        length = _ty.length(quote! {#field.as_ref()})
+    )]
+    Box { ty: Box<Self> },
+    #[assoc(
+        name = quote! {Cow<#_ty>},
+        length = _ty.length(quote! {#field.as_ref()})
     )]
     Cow { ty: Box<Self> },
     #[assoc(
@@ -478,6 +521,13 @@ impl Value {
                     }) = path.path.segments.last()
                     {
                         match ident.to_string().as_str() {
+                            "Box" => {
+                                if let Some(syn::GenericArgument::Type(t)) = args.last() {
+                                    return Self::Box {
+                                        ty: Box::new(Self::from_type(t)),
+                                    };
+                                }
+                            }
                             "Vec" => {
                                 if let Some(syn::GenericArgument::Type(t)) = args.last() {
                                     return Self::Vec {
