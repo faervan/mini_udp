@@ -107,6 +107,7 @@ derive_for!(u128);
 derive_for!(i128);
 derive_for!(String);
 derive_for!(std::borrow::Cow<'a, T>, <'a, T> where T: ByteRepr + ToOwned<Owned = T>);
+derive_for!(std::borrow::Cow<'a, str>, <'a>);
 derive_for!(Option<T>, <T> where T: ByteRepr);
 derive_for!([T; N], <T, const N: usize> where T: ByteRepr + Default);
 derive_for!(Vec<T>, <T> where T: ByteRepr);

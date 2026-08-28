@@ -672,6 +672,12 @@ mod test {
                 c: "c".to_string()
             }
         );
+
+        crate::test_bitrepr_roundtrip!(x, Cow<str>, Cow::Borrowed("hello"));
+        let v = String::from("engöovbnq ljfwnöq");
+        crate::test_bitrepr_roundtrip!(x, Cow<String>, Cow::Borrowed(&v));
+        crate::test_bitrepr_roundtrip!(x, Cow<str>, Cow::Borrowed(&v));
+        crate::test_bitrepr_roundtrip!(x, Cow<String>, Cow::Owned::<String>(v));
     }
 
     #[test]

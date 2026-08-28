@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Derived `ByteRepr` for `Cow<'a, str>`
+
 ### Changed
 
 - Replaced generic `SEND`, `RECV` and `const PROTOCOL_VERSION` parameters to a single
