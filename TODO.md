@@ -22,8 +22,6 @@
 
 ### Misc
 - [ ] Add tests for behavior of `&'a str`, `Option<&'a str>`, etc.
-- [ ] Add an (optional?) packet receive error cache.
-    - Adjust the `test_protocol_version_check` test to assert the error.
 
 ## DONE
 - [x] Add a `CHANGELOG.md` file
@@ -32,3 +30,5 @@
 - [x] Add a max-resend ~timer~ *count* for reliable packets (we shouldn't keep on trying to send the same
     packets forever if the other side is just not reachable).
 - [x] Refactor error handling with a new `mini_udp::Error`.
+- [x] Add an (optional?) packet receive error cache.
+    - [x] Adjust the `test_protocol_version_check` test to assert the error.

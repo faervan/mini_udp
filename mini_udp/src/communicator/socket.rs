@@ -8,6 +8,11 @@ pub trait CommunicatorSocket<CTX: MiniUdpContext> {
         addr: A,
         error_handler: <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler,
     ) -> Self;
+    /// Obtain a mutable reference to the configured [error
+    /// handler](ErrorHandlingStrategy::Handler).
+    fn get_error_handler_mut(
+        &mut self,
+    ) -> &mut <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler;
     /// Set the interval at which reliable unordered packets are to be resend if no
     /// acknowledgement has been received.
     ///
@@ -98,6 +103,12 @@ impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for UdpCommunicatorSocket<CTX>
             #[cfg(feature = "debug")]
             fake_delayed_buffer: vec![],
         }
+    }
+
+    fn get_error_handler_mut(
+        &mut self,
+    ) -> &mut <<CTX as MiniUdpContext>::ErrorHandling as ErrorHandlingStrategy>::Handler {
+        &mut self.error_handler
     }
 
     fn with_reliable_unordered_resend_interval(mut self, interval: Duration) -> Self {

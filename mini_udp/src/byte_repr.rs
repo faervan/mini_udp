@@ -75,7 +75,7 @@ pub trait ByteReprExt: ByteRepr {
 
 impl<T: ByteRepr> ByteReprExt for T {}
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq, Clone)]
 pub enum ByteReprError {
     #[error("The provided byte slice is too short")]
     SliceTooShort,

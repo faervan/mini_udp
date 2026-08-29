@@ -182,6 +182,13 @@ impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for MultiUdpCommunicator<CTX> 
     }
 
     #[inline(always)]
+    fn get_error_handler_mut(
+        &mut self,
+    ) -> &mut <<CTX as MiniUdpContext>::ErrorHandling as ErrorHandlingStrategy>::Handler {
+        self.socket.get_error_handler_mut()
+    }
+
+    #[inline(always)]
     fn with_reliable_unordered_resend_interval(mut self, interval: Duration) -> Self {
         self.socket = self
             .socket

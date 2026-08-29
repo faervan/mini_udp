@@ -20,3 +20,40 @@ pub enum Error {
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }
+
+/// As [`std::io::Error`] does not implement [`PartialEq`], two [`Error::Io`] values never compare
+/// as equal.
+impl PartialEq for Error {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Self::ByteRepr(e1) => {
+                if let Self::ByteRepr(e2) = other
+                    && e1 == e2
+                {
+                    return true;
+                }
+            }
+            Self::CrcFailed => return matches!(other, Self::CrcFailed),
+            Self::PacketLengthLessThanCrcBytes => {
+                return matches!(other, Self::PacketLengthLessThanCrcBytes);
+            }
+            Self::MessageTooBig => return matches!(other, Self::MessageTooBig),
+            Self::PacketTooOld {
+                sequence_id: s1,
+                newest_id: n1,
+            } => {
+                if let Self::PacketTooOld {
+                    sequence_id: s2,
+                    newest_id: n2,
+                } = other
+                    && s1 == s2
+                    && n1 == n2
+                {
+                    return true;
+                }
+            }
+            Self::Io(_) => return false,
+        }
+        false
+    }
+}

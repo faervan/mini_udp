@@ -104,6 +104,13 @@ impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for UdpCommunicator<CTX> {
     }
 
     #[inline(always)]
+    fn get_error_handler_mut(
+        &mut self,
+    ) -> &mut <<CTX as MiniUdpContext>::ErrorHandling as ErrorHandlingStrategy>::Handler {
+        self.socket.get_error_handler_mut()
+    }
+
+    #[inline(always)]
     fn with_reliable_unordered_resend_interval(mut self, interval: Duration) -> Self {
         self.socket = self
             .socket
@@ -487,12 +494,17 @@ mod test {
         let mut com1 = UdpCommunicator::<UdpContext<String, (), 1>>::default()
             .connect("0.0.0.0:7212")
             .unwrap();
-        let mut com2 = UdpCommunicator::<UdpContext<(), String, 2>>::bind("0.0.0.0:7212");
+        let mut com2 = UdpCommunicator::<
+            UdpContext<(), String, 2, mini_udp::context::error_handlers::ErrorCache>,
+        >::bind("0.0.0.0:7212");
         com1.write(String::from("Can you hear me?"));
         com1.send().unwrap();
         com2.recv();
         // Sender send with a protocol version of 1, receiver has a version of 2, so the CRC check
         // failed and no messages are available.
         assert_eq!(com2.read(), None);
+        let errors = com2.get_error_handler_mut();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors.remove(0), Error::CrcFailed);
     }
 }
