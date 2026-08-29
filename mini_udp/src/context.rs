@@ -164,11 +164,33 @@ pub mod error_handlers {
     }
 
     /// Store errors in a [`Vec`] that can be [`drain'ed`](Vec::drain) to handle errors manually.
+    ///
+    /// When the cache is never cleared, this will panic eventually, see [`Vec::push`]. For a
+    /// limited cache that will not panic, use [`LimitedErrorCache`].
     pub struct ErrorCache;
     impl ErrorHandlingStrategy for ErrorCache {
         type Handler = Vec<Error>;
         fn handle_error(handler: &mut Self::Handler, error: Error) {
             handler.push(error);
+        }
+    }
+
+    /// Store errors in a [`Vec`] that can be [`drain'ed`](Vec::drain) to handle errors manually.
+    ///
+    /// However, instead of storing infinite numbers of errors and eventually crashing when the
+    /// cache is never cleared like [`ErrorCache`] does, [`LimitedErrorCache`] will store only a
+    /// maximum of `MAX_CACHED_ERRORS` errors, and emit warning logs if no more errors can be stored.
+    pub struct LimitedErrorCache<const MAX_CACHED_ERRORS: usize = 50>;
+    impl<const MAX_CACHED_ERRORS: usize> ErrorHandlingStrategy
+        for LimitedErrorCache<MAX_CACHED_ERRORS>
+    {
+        type Handler = Vec<Error>;
+        fn handle_error(handler: &mut Self::Handler, error: Error) {
+            if handler.len() < MAX_CACHED_ERRORS {
+                handler.push(error);
+            } else {
+                warn!("The error cache is full! Error: {error}");
+            }
         }
     }
 }
