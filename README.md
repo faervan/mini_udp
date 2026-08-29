@@ -54,7 +54,7 @@ enum MessageToClient {
 /// that was send from a communicator with a different version, the CRC check will fail.
 const PROTOCOL_VERSION: u32 = 1;
 type ClientCtx = UdpContext<MessageToServer, MessageToClient, PROTOCOL_VERSION>;
-type ServerCtx = <ClientCtx as MiniUdpContext>::REVERSE;
+type ServerCtx = <ClientCtx as MiniUdpContext>::Reverse;
 
 const POSITION: [f32; 3] = [-1., 0.004, 2482.3];
 

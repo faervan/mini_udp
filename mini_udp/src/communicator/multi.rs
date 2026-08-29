@@ -25,7 +25,7 @@ pub trait MultiCommunicator<CTX: MiniUdpContext> {
     ///
     /// const PROTOCOL_VERSION: u32 = 109;
     /// type ClientCtx = UdpContext<u8, (), PROTOCOL_VERSION>;
-    /// type ServerCtx = <ClientCtx as MiniUdpContext>::REVERSE;
+    /// type ServerCtx = <ClientCtx as MiniUdpContext>::Reverse;
     ///
     /// let mut multi = MultiUdpCommunicator::<ServerCtx>::bind("0.0.0.0:7000");
     /// let mut com =
@@ -54,13 +54,13 @@ pub trait MultiCommunicator<CTX: MiniUdpContext> {
     /// connection. Connections are never automatically deleted by [`mini_udp`].
     fn iter_mut(&mut self) -> IterMut<'_, CTX>;
     /// Broadcast the provided `message` to all connections, reliably.
-    fn broadcast(&mut self, message: CTX::SEND)
+    fn broadcast(&mut self, message: CTX::Send)
     where
-        CTX::SEND: Clone;
+        CTX::Send: Clone;
     /// Broadcast the provided `message` to all connections except `exception`, reliably.
-    fn broadcast_except(&mut self, message: CTX::SEND, exception: SocketAddr)
+    fn broadcast_except(&mut self, message: CTX::Send, exception: SocketAddr)
     where
-        CTX::SEND: Clone;
+        CTX::Send: Clone;
     /// Execute `f` for each connection.
     fn for_each<F>(&mut self, f: F)
     where
@@ -143,22 +143,40 @@ pub trait MultiCommunicator<CTX: MiniUdpContext> {
 /// });
 /// ```
 pub struct MultiUdpCommunicator<CTX: MiniUdpContext> {
-    pub(super) socket: UdpCommunicatorSocket,
+    pub(super) socket: UdpCommunicatorSocket<CTX>,
     coms: HashMap<SocketAddr, InnerUdpCommunicator<CTX>>,
 }
 
-impl<CTX: MiniUdpContext> Default for MultiUdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext> Default for MultiUdpCommunicator<CTX>
+where
+    <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler: Default,
+{
     #[inline(always)]
     fn default() -> Self {
         Self::bind("0.0.0.0:0")
     }
 }
 
-impl<CTX: MiniUdpContext> CommunicatorSocket for MultiUdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext> MultiUdpCommunicator<CTX>
+where
+    <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler: Default,
+{
     /// Create a new [`MultiUdpCommunicator`], binding it to the provided `addr`.
-    fn bind<A: ToSocketAddrs>(addr: A) -> Self {
+    pub fn bind<A: ToSocketAddrs>(addr: A) -> Self {
         Self {
-            socket: UdpCommunicatorSocket::bind(addr),
+            socket: UdpCommunicatorSocket::bind_with(addr, Default::default()),
+            coms: HashMap::new(),
+        }
+    }
+}
+
+impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for MultiUdpCommunicator<CTX> {
+    fn bind_with<A: ToSocketAddrs>(
+        addr: A,
+        error_handler: <<CTX as MiniUdpContext>::ErrorHandling as ErrorHandlingStrategy>::Handler,
+    ) -> Self {
+        Self {
+            socket: UdpCommunicatorSocket::bind_with(addr, error_handler),
             coms: HashMap::new(),
         }
     }
@@ -217,7 +235,9 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
                 continue;
             }
             let com = self.coms.entry(addr).or_default();
-            com.read_packet(n, &mut self.socket);
+            if let Err(error) = com.read_packet(n, &mut self.socket) {
+                CTX::ErrorHandling::handle_error(&mut self.socket.error_handler, error);
+            }
             on_recv.on_recv(
                 UdpCommunicatorMut {
                     #[cfg(feature = "debug")]
@@ -231,7 +251,9 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
         #[cfg(feature = "debug")]
         while let Some((n, Some(addr))) = self.socket.read_delayed() {
             let com = self.coms.entry(addr).or_default();
-            com.read_packet(n, &mut self.socket);
+            if let Err(error) = com.read_packet(n, &mut self.socket) {
+                CTX::ErrorHandling::handle_error(&mut self.socket.error_handler, error);
+            }
             on_recv.on_recv(
                 UdpCommunicatorMut {
                     socket: &self.socket,
@@ -246,8 +268,11 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
 
     fn send(&mut self) {
         for (addr, inner) in &mut self.coms {
-            if let Err(e) = inner.send(*addr, &mut self.socket) {
-                warn!("Failed to send Communicator of {addr:?}: {e}");
+            if let Err(error) = inner.send(*addr, &mut self.socket) {
+                // TODO! the communicator addr should be propagated to the error handler
+                #[cfg(any(test, feature = "debug"))]
+                warn!("Failed to send Communicator of {addr:?}: {error}");
+                CTX::ErrorHandling::handle_error(&mut self.socket.error_handler, error);
             }
         }
     }
@@ -260,18 +285,18 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
         }
     }
 
-    fn broadcast(&mut self, message: CTX::SEND)
+    fn broadcast(&mut self, message: CTX::Send)
     where
-        CTX::SEND: Clone,
+        CTX::Send: Clone,
     {
         for com in self.coms.values_mut() {
             com.reliable_send_queue.push(message.clone());
         }
     }
 
-    fn broadcast_except(&mut self, message: CTX::SEND, exception: SocketAddr)
+    fn broadcast_except(&mut self, message: CTX::Send, exception: SocketAddr)
     where
-        CTX::SEND: Clone,
+        CTX::Send: Clone,
     {
         for (_, com) in self.coms.iter_mut().filter(|(addr, _)| **addr != exception) {
             com.reliable_send_queue.push(message.clone());
@@ -351,12 +376,12 @@ where
 }
 
 impl<T, CTX: MiniUdpContext>
-    OnReceiveCallback<(UdpCommunicatorMut<'_, CTX>, DelayedBroadcast<'_, CTX::SEND>), CTX> for T
+    OnReceiveCallback<(UdpCommunicatorMut<'_, CTX>, DelayedBroadcast<'_, CTX::Send>), CTX> for T
 where
-    T: FnMut(UdpCommunicatorMut<CTX>, DelayedBroadcast<CTX::SEND>),
-    CTX::SEND: Clone,
+    T: FnMut(UdpCommunicatorMut<CTX>, DelayedBroadcast<CTX::Send>),
+    CTX::Send: Clone,
 {
-    type State = Vec<CTX::SEND>;
+    type State = Vec<CTX::Send>;
     fn prepare(&mut self) -> Self::State {
         vec![]
     }
@@ -374,15 +399,15 @@ impl<T, CTX: MiniUdpContext>
     OnReceiveCallback<
         (
             UdpCommunicatorMut<'_, CTX>,
-            DelayedBroadcastExcept<'_, CTX::SEND>,
+            DelayedBroadcastExcept<'_, CTX::Send>,
         ),
         CTX,
     > for T
 where
-    T: FnMut(UdpCommunicatorMut<CTX>, DelayedBroadcastExcept<CTX::SEND>),
-    CTX::SEND: Clone,
+    T: FnMut(UdpCommunicatorMut<CTX>, DelayedBroadcastExcept<CTX::Send>),
+    CTX::Send: Clone,
 {
-    type State = Vec<(SocketAddr, CTX::SEND)>;
+    type State = Vec<(SocketAddr, CTX::Send)>;
     fn prepare(&mut self) -> Self::State {
         vec![]
     }
@@ -400,7 +425,7 @@ impl<T, CTX: MiniUdpContext>
     OnReceiveCallback<(UdpCommunicatorMut<'_, CTX>, DelayedForEach<'_, CTX>), CTX> for T
 where
     T: FnMut(UdpCommunicatorMut<CTX>, DelayedForEach<CTX>),
-    CTX::SEND: Clone,
+    CTX::Send: Clone,
 {
     type State = Vec<DelayedForEachF<CTX>>;
     fn prepare(&mut self) -> Self::State {
@@ -453,7 +478,7 @@ impl<'a, CTX: MiniUdpContext> DelayedForEach<'a, CTX> {
 
 pub struct IterMut<'a, CTX: MiniUdpContext> {
     #[cfg(feature = "debug")]
-    socket: &'a UdpCommunicatorSocket,
+    socket: &'a UdpCommunicatorSocket<CTX>,
     inner: std::collections::hash_map::IterMut<'a, SocketAddr, InnerUdpCommunicator<CTX>>,
 }
 

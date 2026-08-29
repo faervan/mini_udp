@@ -7,19 +7,19 @@ use crate::{
 };
 
 pub(crate) struct InnerUdpCommunicator<CTX: MiniUdpContext> {
-    pub reliable_send_packets: RingBuffer<PendingPacket<CTX::SEND>>,
-    pub reliable_ordered_send_packets: RingBuffer<PendingPacket<CTX::SEND>>,
+    pub reliable_send_packets: RingBuffer<PendingPacket<CTX::Send>>,
+    pub reliable_ordered_send_packets: RingBuffer<PendingPacket<CTX::Send>>,
     pub reliable_received_packets: RingBuffer<()>,
-    pub reliable_ordered_received_packets: RingBuffer<Vec<CTX::RECV>>,
+    pub reliable_ordered_received_packets: RingBuffer<Vec<CTX::Recv>>,
     /// The sequence id of the next ordered packet to be read
     pub ordered_read_packet_head: u16,
     pub unreliable_send_packet_id: u16,
-    pub unreliable_send_packets: VecDeque<Packet<CTX::SEND>>,
-    pub reliable_send_queue: Vec<CTX::SEND>,
-    pub reliable_ordered_send_queue: Vec<CTX::SEND>,
-    pub unreliable_send_queue: Vec<CTX::SEND>,
-    pub unordered_recv_queue: VecDeque<CTX::RECV>,
-    pub ordered_recv_queue: VecDeque<CTX::RECV>,
+    pub unreliable_send_packets: VecDeque<Packet<CTX::Send>>,
+    pub reliable_send_queue: Vec<CTX::Send>,
+    pub reliable_ordered_send_queue: Vec<CTX::Send>,
+    pub unreliable_send_queue: Vec<CTX::Send>,
+    pub unordered_recv_queue: VecDeque<CTX::Recv>,
+    pub ordered_recv_queue: VecDeque<CTX::Recv>,
     /// If this is `true`, a packet has been received more than once, potentially meaning that we
     /// have to send an ack to the other side.
     pub received_packet_duplicate: bool,
@@ -80,8 +80,8 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
     pub fn send<Addr>(
         &mut self,
         addr: Addr,
-        socket: &mut UdpCommunicatorSocket,
-    ) -> Result<(), ByteReprError>
+        socket: &mut UdpCommunicatorSocket<CTX>,
+    ) -> Result<(), Error>
     where
         Addr: SocketSendAddr,
     {
@@ -112,23 +112,31 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
         self.send_packets(addr, socket)
     }
 
-    pub fn receive(&mut self, socket: &mut UdpCommunicatorSocket) {
+    pub fn receive(&mut self, socket: &mut UdpCommunicatorSocket<CTX>) {
         while let Ok(n) = socket.socket.recv(&mut socket.data_buffer) {
             #[cfg(feature = "debug")]
             if socket.delay_packet(None, n) {
                 continue;
             }
-            self.read_packet(n, socket);
+            if let Err(error) = self.read_packet(n, socket) {
+                CTX::ErrorHandling::handle_error(&mut socket.error_handler, error);
+            }
         }
         #[cfg(feature = "debug")]
         while let Some((n, _)) = socket.read_delayed() {
-            self.read_packet(n, socket);
+            if let Err(error) = self.read_packet(n, socket) {
+                CTX::ErrorHandling::handle_error(&mut socket.error_handler, error);
+            }
         }
     }
 
-    pub fn read_packet(&mut self, n: usize, socket: &mut UdpCommunicatorSocket) {
-        #[cfg(feature = "debug")]
-        let packet = Packet::<CTX::RECV>::from_bytes(&socket.data_buffer[4..n])
+    pub fn read_packet(
+        &mut self,
+        n: usize,
+        socket: &mut UdpCommunicatorSocket<CTX>,
+    ) -> Result<(), Error> {
+        #[cfg(test)]
+        let packet = Packet::<CTX::Recv>::from_bytes(&socket.data_buffer[4..n])
             .unwrap()
             .ack
             .sequence_id;
@@ -139,34 +147,37 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
         {
             let corrupt_num = rand::random_range(0..n * 8);
             if socket.debug_logs {
-                debug!("Corrupting {corrupt_num} bits of packet #{packet}",);
+                #[cfg(test)]
+                debug!("Corrupting {corrupt_num} bits of packet #{packet}");
+                #[cfg(not(test))]
+                debug!("Corrupting {corrupt_num} bits of received packet");
             }
             for i in 0..corrupt_num {
                 socket.data_buffer[i / 8] ^= 1 << (i % 8);
             }
         }
         let Ok(crc_bytes) = socket.data_buffer[..4].try_into() else {
-            return;
+            return Err(Error::PacketLengthLessThanCrcBytes);
         };
         let crc = u32::from_le_bytes(crc_bytes);
         if Self::CRC.checksum(&socket.data_buffer[4..n]) != crc {
-            #[cfg(all(test, feature = "debug"))]
+            #[cfg(test)]
             warn!("CRC check failed, packet: {packet:#?}");
-            return;
+            return Err(Error::CrcFailed);
         }
-        match Packet::<CTX::RECV>::from_bytes(&socket.data_buffer[4..n]) {
+        match Packet::<CTX::Recv>::from_bytes(&socket.data_buffer[4..n]) {
             Ok(packet) => {
                 #[cfg(feature = "debug")]
                 // Fake UDP unreliability
                 if let Some(p) = socket.drop_probability
                     && rand::random_bool(p)
                 {
-                    return;
+                    return Ok(());
                 }
                 #[cfg(test)]
                 debug!("Receiving packet #{}", packet.ack.sequence_id);
-                #[cfg(any(test, feature = "debug"))]
-                let ty_name = (&packet.ty).into();
+                #[cfg(test)]
+                let ty_name = <&str>::from(&packet.ty);
 
                 self.last_seen = Instant::now();
                 match packet.ty {
@@ -186,29 +197,23 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
                             .get(packet.ack.sequence_id)
                             .is_some()
                         {
-                            self.mark_duplicate(
-                                #[cfg(any(test, feature = "debug"))]
-                                DenyReason::AlreadyKnown,
-                                #[cfg(any(test, feature = "debug"))]
-                                &packet.ack,
-                                #[cfg(any(test, feature = "debug"))]
-                                ty_name,
+                            self.received_packet_duplicate = true;
+                            #[cfg(test)]
+                            debug!(
+                                "Received duplicate packet #{} (ty = {ty_name})",
+                                packet.ack.sequence_id,
                             );
-                            return;
+                            return Ok(());
                         }
 
                         let newest_index =
                             self.reliable_ordered_received_packets.get_newest_index();
                         if wrapping_gt(newest_index.wrapping_sub(31), packet.ack.sequence_id, 64) {
-                            self.mark_duplicate(
-                                #[cfg(any(test, feature = "debug"))]
-                                DenyReason::TooOld,
-                                #[cfg(any(test, feature = "debug"))]
-                                &packet.ack,
-                                #[cfg(any(test, feature = "debug"))]
-                                ty_name,
-                            );
-                            return;
+                            self.received_packet_duplicate = true;
+                            return Err(Error::PacketTooOld {
+                                sequence_id: packet.ack.sequence_id,
+                                newest_id: newest_index,
+                            });
                         }
 
                         #[cfg(test)]
@@ -237,28 +242,22 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
                             .get(packet.ack.sequence_id)
                             .is_some()
                         {
-                            self.mark_duplicate(
-                                #[cfg(any(test, feature = "debug"))]
-                                DenyReason::AlreadyKnown,
-                                #[cfg(any(test, feature = "debug"))]
-                                &packet.ack,
-                                #[cfg(any(test, feature = "debug"))]
-                                ty_name,
+                            self.received_packet_duplicate = true;
+                            #[cfg(test)]
+                            debug!(
+                                "Received duplicate packet #{} (ty = {ty_name})",
+                                packet.ack.sequence_id,
                             );
-                            return;
+                            return Ok(());
                         }
 
                         let newest_index = self.reliable_received_packets.get_newest_index();
                         if wrapping_gt(newest_index.wrapping_sub(31), packet.ack.sequence_id, 64) {
-                            self.mark_duplicate(
-                                #[cfg(any(test, feature = "debug"))]
-                                DenyReason::TooOld,
-                                #[cfg(any(test, feature = "debug"))]
-                                &packet.ack,
-                                #[cfg(any(test, feature = "debug"))]
-                                ty_name,
-                            );
-                            return;
+                            self.received_packet_duplicate = true;
+                            return Err(Error::PacketTooOld {
+                                sequence_id: packet.ack.sequence_id,
+                                newest_id: newest_index,
+                            });
                         }
 
                         #[cfg(test)]
@@ -275,12 +274,20 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
                     }
                     PacketType::ReliableOrderedFragment { .. } => todo!(),
                 }
+                Ok(())
             }
-            Err(e) => warn!("Received invalid packet: {e}"),
+            Err(e) => {
+                #[cfg(any(test, feature = "debug"))]
+                warn!("Received invalid packet: {e}");
+                Err(Error::ByteRepr(e))
+            }
         }
     }
 
-    pub fn write_heartbeat(&mut self, #[cfg(feature = "debug")] socket: &UdpCommunicatorSocket) {
+    pub fn write_heartbeat(
+        &mut self,
+        #[cfg(feature = "debug")] socket: &UdpCommunicatorSocket<CTX>,
+    ) {
         let sequence_id = self.unreliable_send_packet_id;
         self.unreliable_send_packet_id = self.unreliable_send_packet_id.wrapping_add(1);
         let packet = Packet::heartbeat(PacketAck::new(
@@ -295,38 +302,15 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
         self.unreliable_send_packets.push_back(packet);
     }
 
-    fn mark_duplicate(
-        &mut self,
-        #[cfg(any(test, feature = "debug"))] reason: DenyReason,
-        #[cfg(any(test, feature = "debug"))] ack: &PacketAck,
-        #[cfg(any(test, feature = "debug"))] ty_name: &'static str,
-    ) {
-        self.received_packet_duplicate = true;
-        #[cfg(any(test, feature = "debug"))]
-        match reason {
-            DenyReason::TooOld => debug!(
-                "Received too old packet #{} (ty = {ty_name})",
-                ack.sequence_id,
-            ),
-            DenyReason::AlreadyKnown => {
-                #[cfg(test)]
-                debug!(
-                    "Received duplicate packet #{} (ty = {ty_name})",
-                    ack.sequence_id,
-                )
-            }
-        }
-    }
-
-    fn flush_messages(&mut self, socket: &UdpCommunicatorSocket) {
-        flush_messages::<false, _, _>(
+    fn flush_messages(&mut self, socket: &UdpCommunicatorSocket<CTX>) {
+        flush_messages::<false, _>(
             socket,
             &mut self.reliable_send_packets,
             &self.reliable_received_packets,
             &self.reliable_ordered_received_packets,
             &mut self.reliable_send_queue,
         );
-        flush_messages::<true, _, _>(
+        flush_messages::<true, _>(
             socket,
             &mut self.reliable_ordered_send_packets,
             &self.reliable_received_packets,
@@ -346,8 +330,8 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
                 }
             }
             if included_msgs == 0 {
-                error!(
-                    "Msg {:#?} is too large to fit {} bytes, but the max packet size is {}",
+                panic!(
+                    "Msg {:#?} is too large (byte_len = {}), the max packet size is {}",
                     self.unreliable_send_queue[0],
                     self.unreliable_send_queue[0].byte_len(),
                     MAX_PACKET_DATA_LEN
@@ -378,8 +362,8 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
     fn send_packets<Addr>(
         &mut self,
         addr: Addr,
-        socket: &mut UdpCommunicatorSocket,
-    ) -> Result<(), ByteReprError>
+        socket: &mut UdpCommunicatorSocket<CTX>,
+    ) -> Result<(), Error>
     where
         Addr: SocketSendAddr,
     {
@@ -420,12 +404,12 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
     }
 }
 
-fn flush_messages<const ORDERED: bool, SEND: ByteRepr, RECV: ByteRepr>(
-    socket: &UdpCommunicatorSocket,
-    send_packets: &mut RingBuffer<PendingPacket<SEND>>,
+fn flush_messages<const ORDERED: bool, CTX: MiniUdpContext>(
+    socket: &UdpCommunicatorSocket<CTX>,
+    send_packets: &mut RingBuffer<PendingPacket<CTX::Send>>,
     reliable_received: &RingBuffer<()>,
-    ordered_received: &RingBuffer<Vec<RECV>>,
-    send_queue: &mut Vec<SEND>,
+    ordered_received: &RingBuffer<Vec<CTX::Recv>>,
+    send_queue: &mut Vec<CTX::Send>,
 ) {
     while !send_packets.push_will_override() && !send_queue.is_empty() {
         let mut available_bytes = MAX_PACKET_DATA_LEN;
@@ -441,8 +425,8 @@ fn flush_messages<const ORDERED: bool, SEND: ByteRepr, RECV: ByteRepr>(
             }
         }
         if included_msgs == 0 {
-            error!(
-                "Msg {:#?} is too large to fit {} bytes, but the max packet size is {}",
+            panic!(
+                "Msg {:#?} is too large (byte_len = {}), the max packet size is {}",
                 send_queue[0],
                 send_queue[0].byte_len(),
                 MAX_PACKET_DATA_LEN
@@ -479,19 +463,19 @@ fn flush_messages<const ORDERED: bool, SEND: ByteRepr, RECV: ByteRepr>(
 }
 
 /// Returns `false` if `remaining_retries` is `0`.
-fn resend_if_needed<const ORDERED: bool, SEND, ADDR>(
+fn resend_if_needed<const ORDERED: bool, CTX, ADDR>(
     PendingPacket {
         last_send,
         remaining_retries,
         packet,
-    }: &mut PendingPacket<SEND>,
-    socket: &mut UdpCommunicatorSocket,
+    }: &mut PendingPacket<CTX::Send>,
+    socket: &mut UdpCommunicatorSocket<CTX>,
     addr: ADDR,
     crc: crc::Crc<u32>,
     any_send: &mut bool,
 ) -> bool
 where
-    SEND: ByteRepr,
+    CTX: MiniUdpContext,
     ADDR: SocketSendAddr,
 {
     #[cfg(test)]
@@ -508,7 +492,7 @@ where
                 "{e}: {:?}\npacket len: {}\npacket max len: {}\ndatabuffer len: {}",
                 *packet,
                 packet.byte_len(),
-                Packet::<SEND>::MAX_BYTE_LEN,
+                Packet::<CTX::Send>::MAX_BYTE_LEN,
                 socket.data_buffer.len()
             );
         }
@@ -525,10 +509,4 @@ where
         }
     }
     true
-}
-
-#[cfg(any(test, feature = "debug"))]
-enum DenyReason {
-    TooOld,
-    AlreadyKnown,
 }

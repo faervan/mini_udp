@@ -2,8 +2,12 @@ use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 
 use crate::prelude::*;
 
-pub trait CommunicatorSocket {
-    fn bind<A: ToSocketAddrs>(addr: A) -> Self;
+pub trait CommunicatorSocket<CTX: MiniUdpContext> {
+    /// Create a new communicator, binding it to the provided `addr`.
+    fn bind_with<A: ToSocketAddrs>(
+        addr: A,
+        error_handler: <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler,
+    ) -> Self;
     /// Set the interval at which reliable unordered packets are to be resend if no
     /// acknowledgement has been received.
     ///
@@ -27,14 +31,14 @@ pub trait CommunicatorSocket {
 }
 
 pub(crate) trait SocketSendAddr: Copy {
-    fn send(
+    fn send<CTX: MiniUdpContext>(
         &self,
-        socket: &mut UdpCommunicatorSocket,
+        socket: &mut UdpCommunicatorSocket<CTX>,
         slice_index: impl std::slice::SliceIndex<[u8], Output = [u8]>,
-    ) -> Result<usize, std::io::Error>;
+    ) -> Result<usize, Error>;
 }
 
-pub(crate) struct UdpCommunicatorSocket {
+pub(crate) struct UdpCommunicatorSocket<CTX: MiniUdpContext> {
     pub socket: UdpSocket,
     pub data_buffer: [u8; MAX_PACKET_LEN],
     /// The delay between resends of the packet.
@@ -43,6 +47,7 @@ pub(crate) struct UdpCommunicatorSocket {
     /// Maximum amount of times a packet will be resend after the initial send.
     pub max_reliable_unordered_retries: usize,
     pub max_reliable_ordered_retries: usize,
+    pub error_handler: <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler,
     #[cfg(feature = "debug")]
     pub drop_probability: Option<f64>,
     #[cfg(feature = "debug")]
@@ -63,8 +68,11 @@ pub(crate) struct UdpCommunicatorSocket {
     )>,
 }
 
-impl CommunicatorSocket for UdpCommunicatorSocket {
-    fn bind<A: ToSocketAddrs>(addr: A) -> Self {
+impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for UdpCommunicatorSocket<CTX> {
+    fn bind_with<A: ToSocketAddrs>(
+        addr: A,
+        error_handler: <<CTX as MiniUdpContext>::ErrorHandling as ErrorHandlingStrategy>::Handler,
+    ) -> Self {
         let socket = UdpSocket::bind(addr).expect("Failed to bind to udp socket");
         socket
             .set_nonblocking(true)
@@ -78,6 +86,7 @@ impl CommunicatorSocket for UdpCommunicatorSocket {
             //
             max_reliable_unordered_retries: 100,
             max_reliable_ordered_retries: 100,
+            error_handler,
             #[cfg(feature = "debug")]
             drop_probability: None,
             #[cfg(feature = "debug")]
@@ -113,23 +122,23 @@ impl CommunicatorSocket for UdpCommunicatorSocket {
 }
 
 impl SocketSendAddr for () {
-    fn send(
+    fn send<CTX: MiniUdpContext>(
         &self,
-        socket: &mut UdpCommunicatorSocket,
+        socket: &mut UdpCommunicatorSocket<CTX>,
         slice_index: impl std::slice::SliceIndex<[u8], Output = [u8]>,
-    ) -> Result<usize, std::io::Error> {
-        socket.socket.send(&socket.data_buffer[slice_index])
+    ) -> Result<usize, Error> {
+        Ok(socket.socket.send(&socket.data_buffer[slice_index])?)
     }
 }
 
 impl SocketSendAddr for SocketAddr {
-    fn send(
+    fn send<CTX: MiniUdpContext>(
         &self,
-        socket: &mut UdpCommunicatorSocket,
+        socket: &mut UdpCommunicatorSocket<CTX>,
         slice_index: impl std::slice::SliceIndex<[u8], Output = [u8]>,
-    ) -> Result<usize, std::io::Error> {
-        socket
+    ) -> Result<usize, Error> {
+        Ok(socket
             .socket
-            .send_to(&socket.data_buffer[slice_index], self)
+            .send_to(&socket.data_buffer[slice_index], self)?)
     }
 }

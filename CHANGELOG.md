@@ -12,12 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Derived `ByteRepr` for `Cow<'a, str>`.
 - Implemented `ByteRepr` for `Box`.
 - Implemented `StaticByteRepr` for `Box`, `Cow` and arrays.
+- Added a new `mini_udp::Error`.
+- Added a `ÈrrorHandling` generic to the `CTX`.
 
 ### Changed
 
 - Replaced generic `SEND`, `RECV` and `const PROTOCOL_VERSION` parameters to a single
     `CTX` that bundles all other generics in the new `MiniUdpContext` trait to
     reduce repetition of the generics and simplify adding more generics later on.
+- Made the `UdpCommunicator::send` method return a `mini_udp::Error` instead of `ByteReprError`.
 
 ### Fixed
 - Fixed `ByteRepr` derive of nested `Cow` + `Option` types like `T(Cow<'static, Option<()>>)`.

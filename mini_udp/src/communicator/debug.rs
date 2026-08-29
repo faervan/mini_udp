@@ -78,7 +78,7 @@ impl<CTX: MiniUdpContext> MiniUdpDebugExt for MultiUdpCommunicator<CTX> {
     }
 }
 
-impl MiniUdpDebugExt for UdpCommunicatorSocket {
+impl<CTX: MiniUdpContext> MiniUdpDebugExt for UdpCommunicatorSocket<CTX> {
     fn with_fake_drop(mut self, drop_probability: f64) -> Self {
         self.drop_probability = Some(drop_probability);
         self
@@ -100,7 +100,7 @@ impl MiniUdpDebugExt for UdpCommunicatorSocket {
     }
 }
 
-impl UdpCommunicatorSocket {
+impl<CTX: MiniUdpContext> UdpCommunicatorSocket<CTX> {
     pub(super) fn delay_packet(&mut self, addr: Option<SocketAddr>, n: usize) -> bool {
         if !self.fake_delay.is_empty() {
             let delay_ms = rand::random_range(self.fake_delay.clone());
