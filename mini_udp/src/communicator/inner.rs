@@ -7,8 +7,8 @@ use crate::{
 };
 
 pub(crate) struct InnerUdpCommunicator<CTX: MiniUdpContext> {
-    pub reliable_send_packets: RingBuffer<PendingPacket<CTX::Send>>,
-    pub reliable_ordered_send_packets: RingBuffer<PendingPacket<CTX::Send>>,
+    pub reliable_send_packets: RingBuffer<PendingPacket<CTX>>,
+    pub reliable_ordered_send_packets: RingBuffer<PendingPacket<CTX>>,
     pub reliable_received_packets: RingBuffer<()>,
     pub reliable_ordered_received_packets: RingBuffer<Vec<CTX::Recv>>,
     /// The sequence id of the next ordered packet to be read
@@ -57,10 +57,9 @@ impl<CTX: MiniUdpContext> Default for InnerUdpCommunicator<CTX> {
     }
 }
 
-pub(crate) struct PendingPacket<SEND: ByteRepr> {
-    last_send: Instant,
-    remaining_retries: usize,
-    packet: Packet<SEND>,
+pub(crate) struct PendingPacket<CTX: MiniUdpContext> {
+    resend_context: <CTX::ResendStrategy as ResendStrategy>::PacketContext,
+    packet: Packet<CTX::Send>,
 }
 
 impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
@@ -114,7 +113,7 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
 
     pub fn receive(&mut self, socket: &mut UdpCommunicatorSocket<CTX>) {
         while let Ok(n) = socket.socket.recv(&mut socket.data_buffer) {
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             if socket.delay_packet(None, n) {
                 continue;
             }
@@ -122,7 +121,7 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
                 CTX::ErrorHandling::handle_error(&mut socket.error_handler, error);
             }
         }
-        #[cfg(feature = "debug")]
+        #[cfg(any(test, feature = "debug"))]
         while let Some((n, _)) = socket.read_delayed() {
             if let Err(error) = self.read_packet(n, socket) {
                 CTX::ErrorHandling::handle_error(&mut socket.error_handler, error);
@@ -286,7 +285,7 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
 
     pub fn write_heartbeat(
         &mut self,
-        #[cfg(feature = "debug")] socket: &UdpCommunicatorSocket<CTX>,
+        #[cfg(any(test, feature = "debug"))] socket: &UdpCommunicatorSocket<CTX>,
     ) {
         let sequence_id = self.unreliable_send_packet_id;
         self.unreliable_send_packet_id = self.unreliable_send_packet_id.wrapping_add(1);
@@ -295,14 +294,14 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
             &self.reliable_received_packets,
             &self.reliable_ordered_received_packets,
         ));
-        #[cfg(feature = "debug")]
+        #[cfg(any(test, feature = "debug"))]
         if socket.debug_logs {
             debug!("Constructed new hearbeat packet with id(unreliable): #{sequence_id}");
         }
         self.unreliable_send_packets.push_back(packet);
     }
 
-    fn flush_messages(&mut self, socket: &UdpCommunicatorSocket<CTX>) {
+    fn flush_messages(&mut self, socket: &mut UdpCommunicatorSocket<CTX>) {
         flush_messages::<false, _>(
             socket,
             &mut self.reliable_send_packets,
@@ -370,10 +369,10 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
         let mut any_send = false;
 
         self.reliable_send_packets.retain(|_, packet| {
-            resend_if_needed::<false, _, _>(packet, socket, addr, Self::CRC, &mut any_send)
+            !resend_if_needed::<false, _, _>(packet, socket, addr, Self::CRC, &mut any_send)
         });
         self.reliable_ordered_send_packets.retain(|_, packet| {
-            resend_if_needed::<true, _, _>(packet, socket, addr, Self::CRC, &mut any_send)
+            !resend_if_needed::<true, _, _>(packet, socket, addr, Self::CRC, &mut any_send)
         });
 
         for packet in self.unreliable_send_packets.drain(..) {
@@ -405,8 +404,8 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
 }
 
 fn flush_messages<const ORDERED: bool, CTX: MiniUdpContext>(
-    socket: &UdpCommunicatorSocket<CTX>,
-    send_packets: &mut RingBuffer<PendingPacket<CTX::Send>>,
+    socket: &mut UdpCommunicatorSocket<CTX>,
+    send_packets: &mut RingBuffer<PendingPacket<CTX>>,
     reliable_received: &RingBuffer<()>,
     ordered_received: &RingBuffer<Vec<CTX::Recv>>,
     send_queue: &mut Vec<CTX::Send>,
@@ -443,32 +442,30 @@ fn flush_messages<const ORDERED: bool, CTX: MiniUdpContext>(
                 false => PacketType::ReliableUnordered { messages },
             },
         };
-        #[cfg(feature = "debug")]
+        #[cfg(any(test, feature = "debug"))]
         if socket.debug_logs {
             debug!(
                 "Constructed new reliable {} packet #{sequence_id} with {included_msgs} messages",
                 if ORDERED { "ordered" } else { "unordered" }
             );
         }
-        let remaining_retries = match ORDERED {
-            true => socket.max_reliable_ordered_retries,
-            false => socket.max_reliable_unordered_retries,
-        };
         send_packets.push(PendingPacket {
-            last_send: Instant::now() - Duration::from_hours(1),
-            remaining_retries,
+            resend_context: socket.resend_handler.new_packet(
+                packet
+                    .get_reliable_kind()
+                    .expect("all packets here are reliable"),
+            ),
             packet,
         });
     }
 }
 
-/// Returns `false` if `remaining_retries` is `0`.
+/// Returns `true` if the packet should not be resend again
 fn resend_if_needed<const ORDERED: bool, CTX, ADDR>(
     PendingPacket {
-        last_send,
-        remaining_retries,
+        resend_context,
         packet,
-    }: &mut PendingPacket<CTX::Send>,
+    }: &mut PendingPacket<CTX>,
     socket: &mut UdpCommunicatorSocket<CTX>,
     addr: ADDR,
     crc: crc::Crc<u32>,
@@ -478,35 +475,33 @@ where
     CTX: MiniUdpContext,
     ADDR: SocketSendAddr,
 {
-    #[cfg(test)]
-    let send_cooldown = Duration::from_millis(3);
-    #[cfg(not(test))]
-    let send_cooldown = match ORDERED {
-        true => socket.reliable_ordered_resend_interval,
-        false => socket.reliable_unordered_resend_interval,
+    let drop_packet = match socket.resend_handler.resend(resend_context) {
+        ResendAction::Resend => false,
+        ResendAction::ResendThenDrop => true,
+        ResendAction::DoNotResend => return false,
     };
-    if last_send.elapsed() > send_cooldown {
-        *last_send = Instant::now();
-        if let Err(e) = packet.write_to_bytes(&mut socket.data_buffer[4..]) {
-            panic!(
-                "{e}: {:?}\npacket len: {}\npacket max len: {}\ndatabuffer len: {}",
-                *packet,
-                packet.byte_len(),
-                Packet::<CTX::Send>::MAX_BYTE_LEN,
-                socket.data_buffer.len()
+    if let Err(error) = packet.write_to_bytes(&mut socket.data_buffer[4..]) {
+        socket
+            .resend_handler
+            .handle_send_error::<CTX::ErrorHandling>(
+                resend_context,
+                Error::ByteRepr(error),
+                &mut socket.error_handler,
             );
-        }
-        let crc = crc.checksum(&socket.data_buffer[4..4 + packet.byte_len()]);
-        socket.data_buffer[..4].copy_from_slice(&crc.to_le_bytes());
-        if let Err(e) = addr.send(socket, ..4 + packet.byte_len()) {
-            error!("Failed to send packet: {e}");
-        } else {
-            *any_send = true;
-        }
-        *remaining_retries -= 1;
-        if *remaining_retries == 0 {
-            return false;
-        }
+        return drop_packet;
     }
-    true
+    let crc = crc.checksum(&socket.data_buffer[4..4 + packet.byte_len()]);
+    socket.data_buffer[..4].copy_from_slice(&crc.to_le_bytes());
+    if let Err(error) = addr.send(socket, ..4 + packet.byte_len()) {
+        socket
+            .resend_handler
+            .handle_send_error::<CTX::ErrorHandling>(
+                resend_context,
+                error,
+                &mut socket.error_handler,
+            );
+        return drop_packet;
+    }
+    *any_send = true;
+    drop_packet
 }

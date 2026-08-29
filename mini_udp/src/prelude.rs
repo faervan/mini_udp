@@ -10,6 +10,7 @@ pub(crate) use crate::packet::{MAX_PACKET_DATA_LEN, MAX_PACKET_LEN, Packet, Pack
 pub(crate) use crate::packet_ack::PacketAck;
 
 pub(crate) use crate::context::ErrorHandlingStrategy;
+pub(crate) use crate::context::{ResendAction, ResendStrategy};
 
 pub(crate) use std::time::{Duration, Instant};
 

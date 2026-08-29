@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `CTX` that bundles all other generics in the new `MiniUdpContext` trait to
     reduce repetition of the generics and simplify adding more generics later on.
 - Made the `UdpCommunicator::send` method return a `mini_udp::Error` instead of `ByteReprError`.
+- Removed the `CommunicatorSocket::with_*` methods in favor of a new `ResendStrategy` types
+    in the `MiniUdpContext`.
 
 ### Fixed
 - Fixed `ByteRepr` derive of nested `Cow` + `Option` types like `T(Cow<'static, Option<()>>)`.

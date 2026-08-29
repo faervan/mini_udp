@@ -13,26 +13,8 @@ pub trait CommunicatorSocket<CTX: MiniUdpContext> {
     fn get_error_handler_mut(
         &mut self,
     ) -> &mut <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler;
-    /// Set the interval at which reliable unordered packets are to be resend if no
-    /// acknowledgement has been received.
-    ///
-    /// The default is 100 milliseconds.
-    fn with_reliable_unordered_resend_interval(self, interval: Duration) -> Self;
-    /// Set the interval at which reliable ordered packets are to be resend if no
-    /// acknowledgement has been received.
-    ///
-    /// The default is 100 milliseconds.
-    fn with_reliable_ordered_resend_interval(self, interval: Duration) -> Self;
-    /// Set the maximum amount of times reliable unordered packets will be resend while no
-    /// acknowledgement has been received.
-    ///
-    /// The default is 100.
-    fn with_max_reliable_unordered_retries(self, retries: usize) -> Self;
-    /// Set the maximum amount of times reliable ordered packets will be resend while no
-    /// acknowledgement has been received.
-    ///
-    /// The default is 100.
-    fn with_max_reliable_ordered_retries(self, retries: usize) -> Self;
+    /// Obtain a mutable reference to the configured [resend handler](MiniUdpContext::ResendStrategy).
+    fn get_resend_handler_mut(&mut self) -> &mut CTX::ResendStrategy;
 }
 
 pub(crate) trait SocketSendAddr: Copy {
@@ -46,22 +28,17 @@ pub(crate) trait SocketSendAddr: Copy {
 pub(crate) struct UdpCommunicatorSocket<CTX: MiniUdpContext> {
     pub socket: UdpSocket,
     pub data_buffer: [u8; MAX_PACKET_LEN],
-    /// The delay between resends of the packet.
-    pub reliable_unordered_resend_interval: Duration,
-    pub reliable_ordered_resend_interval: Duration,
-    /// Maximum amount of times a packet will be resend after the initial send.
-    pub max_reliable_unordered_retries: usize,
-    pub max_reliable_ordered_retries: usize,
     pub error_handler: <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler,
-    #[cfg(feature = "debug")]
+    pub resend_handler: CTX::ResendStrategy,
+    #[cfg(any(test, feature = "debug"))]
     pub drop_probability: Option<f64>,
-    #[cfg(feature = "debug")]
+    #[cfg(any(test, feature = "debug"))]
     pub corruption_probability: Option<f64>,
-    #[cfg(feature = "debug")]
+    #[cfg(any(test, feature = "debug"))]
     pub fake_delay: std::ops::Range<u64>,
-    #[cfg(feature = "debug")]
+    #[cfg(any(test, feature = "debug"))]
     pub debug_logs: bool,
-    #[cfg(feature = "debug")]
+    #[cfg(any(test, feature = "debug"))]
     /// For each read from the socket, this stores the address from which the data was received,
     /// the copied data_buffer, the amount of bytes read and the instant at to which this packet
     /// is being delayed.
@@ -85,22 +62,17 @@ impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for UdpCommunicatorSocket<CTX>
         Self {
             socket,
             data_buffer: [0; MAX_PACKET_LEN],
-            //
-            reliable_unordered_resend_interval: Duration::from_millis(100),
-            reliable_ordered_resend_interval: Duration::from_millis(100),
-            //
-            max_reliable_unordered_retries: 100,
-            max_reliable_ordered_retries: 100,
             error_handler,
-            #[cfg(feature = "debug")]
+            resend_handler: CTX::ResendStrategy::default(),
+            #[cfg(any(test, feature = "debug"))]
             drop_probability: None,
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             corruption_probability: None,
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             fake_delay: 0..0,
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             debug_logs: false,
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             fake_delayed_buffer: vec![],
         }
     }
@@ -111,24 +83,8 @@ impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for UdpCommunicatorSocket<CTX>
         &mut self.error_handler
     }
 
-    fn with_reliable_unordered_resend_interval(mut self, interval: Duration) -> Self {
-        self.reliable_unordered_resend_interval = interval;
-        self
-    }
-
-    fn with_reliable_ordered_resend_interval(mut self, interval: Duration) -> Self {
-        self.reliable_ordered_resend_interval = interval;
-        self
-    }
-
-    fn with_max_reliable_unordered_retries(mut self, retries: usize) -> Self {
-        self.max_reliable_unordered_retries = retries;
-        self
-    }
-
-    fn with_max_reliable_ordered_retries(mut self, retries: usize) -> Self {
-        self.max_reliable_ordered_retries = retries;
-        self
+    fn get_resend_handler_mut(&mut self) -> &mut <CTX as MiniUdpContext>::ResendStrategy {
+        &mut self.resend_handler
     }
 }
 

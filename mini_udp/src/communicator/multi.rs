@@ -189,29 +189,8 @@ impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for MultiUdpCommunicator<CTX> 
     }
 
     #[inline(always)]
-    fn with_reliable_unordered_resend_interval(mut self, interval: Duration) -> Self {
-        self.socket = self
-            .socket
-            .with_reliable_unordered_resend_interval(interval);
-        self
-    }
-
-    #[inline(always)]
-    fn with_reliable_ordered_resend_interval(mut self, interval: Duration) -> Self {
-        self.socket = self.socket.with_reliable_ordered_resend_interval(interval);
-        self
-    }
-
-    #[inline(always)]
-    fn with_max_reliable_unordered_retries(mut self, retries: usize) -> Self {
-        self.socket = self.socket.with_max_reliable_unordered_retries(retries);
-        self
-    }
-
-    #[inline(always)]
-    fn with_max_reliable_ordered_retries(mut self, retries: usize) -> Self {
-        self.socket = self.socket.with_max_reliable_ordered_retries(retries);
-        self
+    fn get_resend_handler_mut(&mut self) -> &mut <CTX as MiniUdpContext>::ResendStrategy {
+        self.socket.get_resend_handler_mut()
     }
 }
 
@@ -224,7 +203,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
             std::io::Error::other("The provided `addr` parses into an empty SocketAddr iterator")
         })?;
         Ok(UdpCommunicatorMut {
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             socket: &self.socket,
             addr,
             inner: self.coms.entry(addr).or_default(),
@@ -237,7 +216,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
     {
         let mut state = on_recv.prepare();
         while let Ok((n, addr)) = self.socket.socket.recv_from(&mut self.socket.data_buffer) {
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             if self.socket.delay_packet(Some(addr), n) {
                 continue;
             }
@@ -247,7 +226,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
             }
             on_recv.on_recv(
                 UdpCommunicatorMut {
-                    #[cfg(feature = "debug")]
+                    #[cfg(any(test, feature = "debug"))]
                     socket: &self.socket,
                     addr,
                     inner: com,
@@ -255,7 +234,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
                 &mut state,
             );
         }
-        #[cfg(feature = "debug")]
+        #[cfg(any(test, feature = "debug"))]
         while let Some((n, Some(addr))) = self.socket.read_delayed() {
             let com = self.coms.entry(addr).or_default();
             if let Err(error) = com.read_packet(n, &mut self.socket) {
@@ -286,7 +265,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
 
     fn iter_mut(&mut self) -> IterMut<'_, CTX> {
         IterMut {
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             socket: &self.socket,
             inner: self.coms.iter_mut(),
         }
@@ -316,7 +295,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
     {
         for (addr, com) in self.coms.iter_mut() {
             f(UdpCommunicatorMut {
-                #[cfg(feature = "debug")]
+                #[cfg(any(test, feature = "debug"))]
                 socket: &self.socket,
                 addr: *addr,
                 inner: com,
@@ -330,7 +309,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
     {
         self.coms.retain(|addr, inner| {
             filter(UdpCommunicatorMut {
-                #[cfg(feature = "debug")]
+                #[cfg(any(test, feature = "debug"))]
                 socket: &self.socket,
                 addr: *addr,
                 inner,
@@ -345,7 +324,7 @@ impl<CTX: MiniUdpContext> MultiCommunicator<CTX> for MultiUdpCommunicator<CTX> {
     fn get_mut<'a>(&'a mut self, addr: &'a SocketAddr) -> Option<UdpCommunicatorMut<'a, CTX>> {
         let inner = self.coms.get_mut(addr)?;
         Some(UdpCommunicatorMut {
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             socket: &self.socket,
             addr: *addr,
             inner,
@@ -484,7 +463,7 @@ impl<'a, CTX: MiniUdpContext> DelayedForEach<'a, CTX> {
 }
 
 pub struct IterMut<'a, CTX: MiniUdpContext> {
-    #[cfg(feature = "debug")]
+    #[cfg(any(test, feature = "debug"))]
     socket: &'a UdpCommunicatorSocket<CTX>,
     inner: std::collections::hash_map::IterMut<'a, SocketAddr, InnerUdpCommunicator<CTX>>,
 }
@@ -493,7 +472,7 @@ impl<'a, CTX: MiniUdpContext> Iterator for IterMut<'a, CTX> {
     type Item = UdpCommunicatorMut<'a, CTX>;
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|(addr, inner)| UdpCommunicatorMut {
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             socket: self.socket,
             addr: *addr,
             inner,

@@ -54,12 +54,31 @@ pub(super) enum PacketType<M: ByteRepr> {
     },
 }
 
+#[derive(Debug, PartialEq)]
+pub enum ReliablePacketKind {
+    Ordered,
+    Unordered,
+    OrderedFragment,
+}
+
 impl<M: ByteRepr> Packet<M> {
     #[inline(always)]
     pub(super) fn heartbeat(ack: PacketAck) -> Self {
         Self {
             ack,
             ty: PacketType::Heartbeat,
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn get_reliable_kind(&self) -> Option<ReliablePacketKind> {
+        match &self.ty {
+            PacketType::ReliableOrdered { .. } => Some(ReliablePacketKind::Ordered),
+            PacketType::ReliableUnordered { .. } => Some(ReliablePacketKind::Unordered),
+            PacketType::ReliableOrderedFragment { .. } => Some(ReliablePacketKind::OrderedFragment),
+            PacketType::Heartbeat
+            | PacketType::Unreliable { .. }
+            | PacketType::UnreliableFragment { .. } => None,
         }
     }
 }

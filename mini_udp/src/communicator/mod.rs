@@ -1,5 +1,7 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 
+#[cfg(test)]
+use crate::context::resend_strategies::FixedResend;
 use crate::prelude::*;
 
 mod inner;
@@ -11,9 +13,9 @@ pub use multi::*;
 mod socket;
 pub use socket::*;
 
-#[cfg(feature = "debug")]
+#[cfg(any(test, feature = "debug"))]
 mod debug;
-#[cfg(feature = "debug")]
+#[cfg(any(test, feature = "debug"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "debug")))]
 pub use debug::MiniUdpDebugExt;
 
@@ -111,35 +113,14 @@ impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for UdpCommunicator<CTX> {
     }
 
     #[inline(always)]
-    fn with_reliable_unordered_resend_interval(mut self, interval: Duration) -> Self {
-        self.socket = self
-            .socket
-            .with_reliable_unordered_resend_interval(interval);
-        self
-    }
-
-    #[inline(always)]
-    fn with_reliable_ordered_resend_interval(mut self, interval: Duration) -> Self {
-        self.socket = self.socket.with_reliable_ordered_resend_interval(interval);
-        self
-    }
-
-    #[inline(always)]
-    fn with_max_reliable_unordered_retries(mut self, retries: usize) -> Self {
-        self.socket = self.socket.with_max_reliable_unordered_retries(retries);
-        self
-    }
-
-    #[inline(always)]
-    fn with_max_reliable_ordered_retries(mut self, retries: usize) -> Self {
-        self.socket = self.socket.with_max_reliable_ordered_retries(retries);
-        self
+    fn get_resend_handler_mut(&mut self) -> &mut <CTX as MiniUdpContext>::ResendStrategy {
+        self.socket.get_resend_handler_mut()
     }
 }
 
 /// A connection of an [`MultiUdpCommunicator`].
 pub struct UdpCommunicatorMut<'a, CTX: MiniUdpContext> {
-    #[cfg(feature = "debug")]
+    #[cfg(any(test, feature = "debug"))]
     socket: &'a UdpCommunicatorSocket<CTX>,
     pub addr: SocketAddr,
     inner: &'a mut InnerUdpCommunicator<CTX>,
@@ -173,7 +154,7 @@ impl<CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicator<CTX> {
     #[inline(always)]
     fn write_heartbeat(&mut self) {
         self.inner.write_heartbeat(
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             &self.socket,
         );
     }
@@ -223,7 +204,7 @@ impl<'a, CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicatorMut<'a, CTX> 
     #[inline(always)]
     fn write_heartbeat(&mut self) {
         self.inner.write_heartbeat(
-            #[cfg(feature = "debug")]
+            #[cfg(any(test, feature = "debug"))]
             self.socket,
         );
     }
@@ -291,7 +272,7 @@ impl<CTX: MiniUdpContext> UdpCommunicator<CTX> {
 }
 
 #[cfg(test)]
-pub(crate) fn test_init<CTX: MiniUdpContext>(
+pub(crate) fn test_init<CTX: MiniUdpContext<ResendStrategy = FixedResend>>(
     port_offset: u16,
 ) -> (UdpCommunicator<CTX>, UdpCommunicator<CTX::Reverse>)
 where
@@ -305,10 +286,20 @@ where
     let localhost = std::net::IpAddr::V4(localhost);
     let addr1 = std::net::SocketAddr::new(localhost, port_offset);
     let addr2 = std::net::SocketAddr::new(localhost, port_offset + 1);
-    let com1 = UdpCommunicator::<CTX>::bind(addr1).connect(addr2).unwrap();
-    let com2 = UdpCommunicator::<CTX::Reverse>::bind(addr2)
+    let mut com1 = UdpCommunicator::<CTX>::bind(addr1)
+        .connect(addr2)
+        .unwrap()
+        .with_debug_logs();
+    let mut com2 = UdpCommunicator::<CTX::Reverse>::bind(addr2)
         .connect(addr1)
-        .unwrap();
+        .unwrap()
+        .with_debug_logs();
+
+    com1.get_resend_handler_mut()
+        .set_resend_interval(Duration::from_millis(3));
+    com2.get_resend_handler_mut()
+        .set_resend_interval(Duration::from_millis(3));
+
     (com1, com2)
 }
 
