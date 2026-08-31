@@ -1,6 +1,7 @@
 pub use mini_udp_derive::ByteRepr;
 
 pub use crate::byte_repr::{ByteRepr, ByteReprError, ByteReprExt, StaticByteRepr};
+pub use crate::communicator::packet_handler::{DefaultPacketHandler, PacketHandler};
 pub use crate::communicator::*;
 pub use crate::context::{MiniUdpContext, UdpContext};
 

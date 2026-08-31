@@ -13,13 +13,15 @@ pub use multi::*;
 mod socket;
 pub use socket::*;
 
+pub mod packet_handler;
+
 #[cfg(any(test, feature = "debug"))]
 mod debug;
 #[cfg(any(test, feature = "debug"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "debug")))]
 pub use debug::MiniUdpDebugExt;
 
-pub trait Communicator<CTX: MiniUdpContext> {
+pub trait Communicator<CTX: MiniUdpContext, PacketHandling: PacketHandler> {
     /// Queue a message to be send unreliably.
     fn write(&mut self, message: CTX::Send);
     /// Queue a message to be send reliably, but not necessarily in order.
@@ -76,12 +78,15 @@ pub trait Communicator<CTX: MiniUdpContext> {
 /// com2.recv();
 /// assert_eq!(com2.read(), Some(Message(Cow::Owned(String::from(message)))));
 /// ```
-pub struct UdpCommunicator<CTX: MiniUdpContext> {
+pub struct UdpCommunicator<
+    CTX: MiniUdpContext,
+    PacketHandling: PacketHandler = DefaultPacketHandler,
+> {
     socket: UdpCommunicatorSocket<CTX>,
-    pub(super) inner: InnerUdpCommunicator<CTX>,
+    pub(super) inner: InnerUdpCommunicator<CTX, PacketHandling>,
 }
 
-impl<CTX: MiniUdpContext> UdpCommunicator<CTX>
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> UdpCommunicator<CTX, PacketHandling>
 where
     <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler: Default,
 {
@@ -94,7 +99,9 @@ where
     }
 }
 
-impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for UdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> CommunicatorSocket<CTX>
+    for UdpCommunicator<CTX, PacketHandling>
+{
     fn bind_with<A: ToSocketAddrs>(
         addr: A,
         error_handler: <<CTX as MiniUdpContext>::ErrorHandling as ErrorHandlingStrategy>::Handler,
@@ -119,14 +126,15 @@ impl<CTX: MiniUdpContext> CommunicatorSocket<CTX> for UdpCommunicator<CTX> {
 }
 
 /// A connection of an [`MultiUdpCommunicator`].
-pub struct UdpCommunicatorMut<'a, CTX: MiniUdpContext> {
+pub struct UdpCommunicatorMut<'a, CTX: MiniUdpContext, PacketHandling: PacketHandler> {
     #[cfg(any(test, feature = "debug"))]
     socket: &'a UdpCommunicatorSocket<CTX>,
     pub addr: SocketAddr,
-    inner: &'a mut InnerUdpCommunicator<CTX>,
+    inner: &'a mut InnerUdpCommunicator<CTX, PacketHandling>,
 }
 
-impl<CTX: MiniUdpContext> Default for UdpCommunicator<CTX>
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> Default
+    for UdpCommunicator<CTX, PacketHandling>
 where
     <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler: Default,
 {
@@ -135,7 +143,9 @@ where
     }
 }
 
-impl<CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> Communicator<CTX, PacketHandling>
+    for UdpCommunicator<CTX, PacketHandling>
+{
     #[inline(always)]
     fn write(&mut self, message: CTX::Send) {
         self.inner.unreliable_send_queue.push(message);
@@ -185,7 +195,9 @@ impl<CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicator<CTX> {
     }
 }
 
-impl<'a, CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicatorMut<'a, CTX> {
+impl<'a, CTX: MiniUdpContext, PacketHandling: PacketHandler> Communicator<CTX, PacketHandling>
+    for UdpCommunicatorMut<'a, CTX, PacketHandling>
+{
     #[inline(always)]
     fn write(&mut self, message: CTX::Send) {
         self.inner.unreliable_send_queue.push(message);
@@ -235,7 +247,7 @@ impl<'a, CTX: MiniUdpContext> Communicator<CTX> for UdpCommunicatorMut<'a, CTX> 
     }
 }
 
-impl<CTX: MiniUdpContext> UdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> UdpCommunicator<CTX, PacketHandling> {
     #[inline(always)]
     /// Connect to the provided `addr`.
     ///
@@ -272,9 +284,15 @@ impl<CTX: MiniUdpContext> UdpCommunicator<CTX> {
 }
 
 #[cfg(test)]
-pub(crate) fn test_init<CTX: MiniUdpContext<ResendStrategy = FixedResend>>(
+pub(crate) fn test_init<
+    CTX: MiniUdpContext<ResendStrategy = FixedResend>,
+    PacketHandling: PacketHandler,
+>(
     port_offset: u16,
-) -> (UdpCommunicator<CTX>, UdpCommunicator<CTX::Reverse>)
+) -> (
+    UdpCommunicator<CTX, PacketHandling>,
+    UdpCommunicator<CTX::Reverse, PacketHandling>,
+)
 where
     <CTX::ErrorHandling as ErrorHandlingStrategy>::Handler: Default,
 {
@@ -286,11 +304,11 @@ where
     let localhost = std::net::IpAddr::V4(localhost);
     let addr1 = std::net::SocketAddr::new(localhost, port_offset);
     let addr2 = std::net::SocketAddr::new(localhost, port_offset + 1);
-    let mut com1 = UdpCommunicator::<CTX>::bind(addr1)
+    let mut com1 = UdpCommunicator::<CTX, PacketHandling>::bind(addr1)
         .connect(addr2)
         .unwrap()
         .with_debug_logs();
-    let mut com2 = UdpCommunicator::<CTX::Reverse>::bind(addr2)
+    let mut com2 = UdpCommunicator::<CTX::Reverse, PacketHandling>::bind(addr2)
         .connect(addr1)
         .unwrap()
         .with_debug_logs();
@@ -315,7 +333,7 @@ mod test {
 
     #[test]
     fn packet_roundtrip() {
-        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7200);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx, DefaultPacketHandler>(7200);
         let m1 = InnerUdpMessage::Hello;
         let m2 = InnerUdpMessage::Wave(1394);
         com2.write(m1);
@@ -329,7 +347,7 @@ mod test {
 
     #[test]
     fn send_until_ack() {
-        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7202);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx, DefaultPacketHandler>(7202);
         let m1 = InnerUdpMessage::Hello;
         com2.write_reliable(m1);
         com2.tick().unwrap();
@@ -352,7 +370,7 @@ mod test {
 
     #[test]
     fn test_reliability() {
-        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7204);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx, DefaultPacketHandler>(7204);
         #[cfg(feature = "debug")]
         {
             com1.socket = com1
@@ -387,7 +405,7 @@ mod test {
 
     #[test]
     fn test_ordered_reliability() {
-        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7206);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx, DefaultPacketHandler>(7206);
         #[cfg(feature = "debug")]
         {
             com1.socket = com1
@@ -425,7 +443,7 @@ mod test {
     #[test]
     #[cfg(feature = "debug")]
     fn test_fake_delay() {
-        let (mut com1, mut com2) = super::test_init::<UdpCtx>(7208);
+        let (mut com1, mut com2) = super::test_init::<UdpCtx, DefaultPacketHandler>(7208);
         com1.socket = com1.socket.with_debug_logs();
         com2.socket = com2.socket.with_fake_delay(70..80);
         let msg = InnerUdpMessage::Wave(u16::MAX);
@@ -468,7 +486,7 @@ mod test {
             use std::thread::sleep;
 
             sleep(Duration::from_millis(1));
-            multi_com.recv(|mut com: UdpCommunicatorMut<_>| {
+            multi_com.recv(|mut com: UdpCommunicatorMut<_, _>| {
                 assert_eq!(com.read_ordered().unwrap(), msg);
                 assert!(start.elapsed().as_millis() > 24);
                 assert!(start.elapsed().as_millis() < 30);
@@ -497,5 +515,33 @@ mod test {
         let errors = com2.get_error_handler_mut();
         assert_eq!(errors.len(), 1);
         assert_eq!(errors.remove(0), Error::CrcFailed);
+    }
+
+    #[test]
+    fn test_unreliable_fragmenting() {
+        let msg = (0..5000_usize).fold(String::new(), |mut acc, i| {
+            acc += &i.to_string();
+            acc
+        });
+        assert_eq!(msg.byte_len(), 18894);
+
+        let (mut com1, mut com2) =
+            super::test_init::<UdpContext<String, String, 1>, DefaultPacketHandler>(7214);
+        com1.write(msg.clone());
+
+        com1.send().unwrap();
+        com2.recv();
+
+        assert!(com2.read().is_none());
+    }
+
+    #[test]
+    fn x() {
+        assert_eq!(
+            0,
+            std::mem::size_of::<
+                InnerUdpCommunicator<UdpContext<String, String, 0>, DefaultPacketHandler>,
+            >()
+        );
     }
 }

@@ -15,7 +15,7 @@ pub(super) struct PacketAck {
     ordered_ack_bits: u32,
 }
 
-impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> InnerUdpCommunicator<CTX, PacketHandling> {
     pub(super) fn acknowledge(&mut self, ack: &PacketAck) {
         for i in 0..32 {
             if ack.reliable_ack_bits & 1 << i != 0 {
@@ -64,7 +64,8 @@ mod test {
 
     #[test]
     fn acknowledge() {
-        let (mut com1, mut com2) = crate::communicator::test_init::<UdpContext<_, bool, 1>>(7300);
+        let (mut com1, mut com2) =
+            crate::communicator::test_init::<UdpContext<_, bool, 1>, DefaultPacketHandler>(7300);
         com1.write_reliable(InnerUdpMessage::Hello);
         assert_eq!(com1.inner.reliable_send_packets.iter().count(), 0);
         com1.tick().unwrap();

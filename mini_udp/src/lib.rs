@@ -70,7 +70,7 @@
 //!     client.send().unwrap();
 //!     // Receive all new packets. You can provide a callback function that will be called for each
 //!     // received packet, with a mutable reference to the associated connection.
-//!     server.recv(|mut com: UdpCommunicatorMut<_>| {
+//!     server.recv(|mut com: UdpCommunicatorMut<_, _>| {
 //!         if let Some(msg) = com.read_ordered() {
 //!             messages_read += 1;
 //!             match msg {

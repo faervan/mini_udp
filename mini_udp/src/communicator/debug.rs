@@ -26,7 +26,9 @@ pub trait MiniUdpDebugExt {
     fn with_debug_logs(self) -> Self;
 }
 
-impl<CTX: MiniUdpContext> MiniUdpDebugExt for UdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> MiniUdpDebugExt
+    for UdpCommunicator<CTX, PacketHandling>
+{
     #[inline(always)]
     fn with_fake_drop(mut self, drop_probability: f64) -> Self {
         self.socket = self.socket.with_fake_drop(drop_probability);
@@ -52,7 +54,9 @@ impl<CTX: MiniUdpContext> MiniUdpDebugExt for UdpCommunicator<CTX> {
     }
 }
 
-impl<CTX: MiniUdpContext> MiniUdpDebugExt for MultiUdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> MiniUdpDebugExt
+    for MultiUdpCommunicator<CTX, PacketHandling>
+{
     #[inline(always)]
     fn with_fake_drop(mut self, drop_probability: f64) -> Self {
         self.socket = self.socket.with_fake_drop(drop_probability);

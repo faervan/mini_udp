@@ -6,11 +6,13 @@ use crate::{
     ring_buffer::{RingBuffer, wrapping_gt},
 };
 
-pub(crate) struct InnerUdpCommunicator<CTX: MiniUdpContext> {
+pub(crate) struct InnerUdpCommunicator<CTX: MiniUdpContext, PacketHandling: PacketHandler> {
     pub reliable_send_packets: RingBuffer<PendingPacket<CTX>>,
     pub reliable_ordered_send_packets: RingBuffer<PendingPacket<CTX>>,
     pub reliable_received_packets: RingBuffer<()>,
     pub reliable_ordered_received_packets: RingBuffer<Vec<CTX::Recv>>,
+    /// TODO!
+    pub unreliable_received_fragments: PacketHandling::UnreliableFragmentationHandler,
     /// The sequence id of the next ordered packet to be read
     pub ordered_read_packet_head: u16,
     pub unreliable_send_packet_id: u16,
@@ -31,13 +33,17 @@ pub(crate) struct InnerUdpCommunicator<CTX: MiniUdpContext> {
     pub received_ordered_packet_ids: std::collections::HashSet<u16>,
 }
 
-impl<CTX: MiniUdpContext> Default for InnerUdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> Default
+    for InnerUdpCommunicator<CTX, PacketHandling>
+{
     fn default() -> Self {
         Self {
             reliable_send_packets: RingBuffer::new(),
             reliable_ordered_send_packets: RingBuffer::new(),
             reliable_received_packets: RingBuffer::new(),
             reliable_ordered_received_packets: RingBuffer::new(),
+            unreliable_received_fragments: PacketHandling::UnreliableFragmentationHandler::default(
+            ),
             ordered_read_packet_head: 0,
             unreliable_send_packet_id: 0,
             unreliable_send_packets: VecDeque::new(),
@@ -62,7 +68,7 @@ pub(crate) struct PendingPacket<CTX: MiniUdpContext> {
     packet: Packet<CTX::Send>,
 }
 
-impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
+impl<CTX: MiniUdpContext, PacketHandling: PacketHandler> InnerUdpCommunicator<CTX, PacketHandling> {
     /// [`crc::CRC_32_BZIP2`] with `init` set to [`PROTOCOL_VERSION`]
     const CRC_ALGORITHM: crc::Algorithm<u32> = crc::Algorithm {
         width: 32,

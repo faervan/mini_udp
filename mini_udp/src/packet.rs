@@ -6,7 +6,7 @@ pub const MAX_PACKET_DATA_LEN: usize = 1024;
 /// 4 bytes for the CRC, then the `PacketAck`, then 1 byte for the packet type,
 ///   finally 4 bytes for the amount of messages in the packet (this is not necessary as it can be
 ///   infered from the UDP packet length, but the [`ByteRepr`] derive currently always includes it)
-///   or alternatively 4 bytes for chunk_id, fragment_id and fragment count.
+///   or alternatively 2 bytes for fragment_id and fragment count.
 pub const PACKET_HEADER_LEN: usize =
     // CRC
     4
@@ -14,7 +14,7 @@ pub const PACKET_HEADER_LEN: usize =
     + PacketAck::BYTE_LEN
     // Packet type
     + 1
-    // Num messages or chunk_id + num_fragments + fragment_id
+    // Num messages or 2 bytes for num_fragments + fragment_id
     + 4;
 /// The maximum allowed length of a UDP packet.
 pub const MAX_PACKET_LEN: usize = PACKET_HEADER_LEN + MAX_PACKET_DATA_LEN;
@@ -35,7 +35,6 @@ pub(super) enum PacketType<M: ByteRepr> {
         messages: Vec<M>,
     },
     UnreliableFragment {
-        chunk_id: u16,
         num_fragments: u8,
         fragment_id: u8,
         data: [u8; MAX_PACKET_DATA_LEN],
@@ -44,7 +43,6 @@ pub(super) enum PacketType<M: ByteRepr> {
         messages: Vec<M>,
     },
     ReliableOrderedFragment {
-        chunk_id: u16,
         num_fragments: u8,
         fragment_id: u8,
         data: [u8; MAX_PACKET_DATA_LEN],

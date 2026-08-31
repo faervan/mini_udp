@@ -22,6 +22,9 @@
 
 ### Misc
 - [ ] Add tests for behavior of `&'a str`, `Option<&'a str>`, etc.
+- [ ] It would be awesome to make the `RingBuffer` sizes of `InnerUdpCommunicator` configurable
+    without spamming const params for this. However, this is not possible on stable until
+    <https://github.com/rust-lang/rust/issues/132980> lands.
 
 ## DONE
 - [x] Add a `CHANGELOG.md` file
