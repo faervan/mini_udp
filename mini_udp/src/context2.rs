@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::prelude::*;
+use crate::{packet::ReliablePacketKind, prelude2::*};
 
 /// A helper trait used to keep the number of generic parameters for `mini_udp` types in check.
 /// You can implement it yourself or use a type alias to [`UdpContext`].
@@ -154,7 +154,7 @@ pub trait ErrorHandlingStrategy {
 }
 
 pub mod error_handlers {
-    use crate::prelude::*;
+    use crate::prelude2::*;
 
     /// Emit an error log at [`Level::TRACE`](tracing::Level::TRACE) whenever an error occurs.
     pub struct TraceOnError;
@@ -261,7 +261,7 @@ pub enum ResendAction {
 }
 
 pub mod resend_strategies {
-    use crate::prelude::*;
+    use crate::{packet::ReliablePacketKind, prelude2::*};
 
     /// Resend reliable packets at a fixed interval, with a fixed retry limit.
     pub struct FixedResend {

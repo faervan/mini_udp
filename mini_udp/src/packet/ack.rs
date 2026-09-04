@@ -1,4 +1,4 @@
-use crate::{prelude::*, ring_buffer::RingBuffer};
+use crate::{prelude2::*, ring_buffer::RingBuffer};
 
 #[derive(Debug, ByteRepr)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -15,18 +15,19 @@ pub(crate) struct PacketAck {
     ordered_ack_bits: u32,
 }
 
-impl<Context: MiniUdpContext> InnerUdpCommunicator<Context> {
+impl<Config: MiniUdpConfig> InnerCommunicator<Config> {
     pub(crate) fn acknowledge(&mut self, ack: &PacketAck) {
-        for i in 0..32 {
-            if ack.reliable_ack_bits & 1 << i != 0 {
-                let index = ack.reliable_newest_received.wrapping_sub(i);
-                self.reliable_send_packets.take(index);
-            }
-            if ack.ordered_ack_bits & 1 << i != 0 {
-                let index = ack.ordered_newest_received.wrapping_sub(i);
-                self.reliable_ordered_send_packets.take(index);
-            }
-        }
+        todo!()
+        // for i in 0..32 {
+        //     if ack.reliable_ack_bits & 1 << i != 0 {
+        //         let index = ack.reliable_newest_received.wrapping_sub(i);
+        //         self.reliable_send_packets.take(index);
+        //     }
+        //     if ack.ordered_ack_bits & 1 << i != 0 {
+        //         let index = ack.ordered_newest_received.wrapping_sub(i);
+        //         self.reliable_ordered_send_packets.take(index);
+        //     }
+        // }
     }
 }
 

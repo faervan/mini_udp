@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 #[derive(Debug)]
 /// A ring buffer with a capacity of `NUM_ITEMS` items.
+/// `NUM_ITEMS` has to be a power of 2.
 pub struct RingBuffer<T, const NUM_ITEMS: usize = 32> {
     newest: u16,
     items: [Option<T>; NUM_ITEMS],
