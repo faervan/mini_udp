@@ -170,7 +170,45 @@ impl<Config: MiniUdpConfig> UdpCommunicator<Config> {
                     data,
                 }) => {
                     let _span = trace_span!("received Packet::Data").entered();
-                    todo!()
+                    match data {
+                        PacketData::Heartbeat => todo!(),
+                        PacketData::Unreliable { messages } => todo!(),
+                        PacketData::ReliableUnordered { messages } => todo!(),
+                        PacketData::ReliableOrdered { messages } => {
+                            match self
+                                .inner
+                                .reliable_ordered
+                                .read_packet(sequence_id, messages)
+                            {
+                                // Packet has already been received.
+                                Ok(true) => {
+                                    self.inner.received_packet_duplicate = true;
+                                    continue;
+                                }
+                                // Received a new packet.
+                                Ok(false) => {
+                                    self.inner.acknowledge(ack);
+                                }
+                                // Error reading packet.
+                                Err(e) => {
+                                    self.socket.handle_error(e);
+                                    continue;
+                                }
+                            }
+                        }
+                        PacketData::UnreliableFragment {
+                            chunk_id,
+                            num_fragments,
+                            fragment_id,
+                            data,
+                        } => todo!(),
+                        PacketData::ReliableOrderedFragment {
+                            chunk_id,
+                            num_fragments,
+                            fragment_id,
+                            data,
+                        } => todo!(),
+                    }
                 }
                 Err(e) => {
                     let _span = trace_span!("packet read error").entered();
@@ -317,6 +355,22 @@ mod test {
             MessageState::Packeted {
                 packet_priority: Priority::Default,
                 state: ReliablePacketState::Sending { times_send: 1, .. },
+                ..
+            }
+        ));
+
+        com2.recv();
+        // TODO! Maybe remove this if we re-add automatic ack heartbeats
+        com2.write_ordered(Msg::Bye);
+        com2.send().unwrap();
+
+        com1.recv();
+        debug!("state: {:#?}", trace.state());
+        assert!(matches!(
+            trace.state(),
+            MessageState::Packeted {
+                packet_priority: Priority::Default,
+                state: ReliablePacketState::Acknowledged { times_send: 1, .. },
                 ..
             }
         ));
