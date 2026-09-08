@@ -159,9 +159,10 @@ impl<Config: MiniUdpConfig, MaxPackets: MaxConcurrentPackets> ReliableOrderedPac
         sequence_id: u16,
         messages: Vec<<Config::Context as MiniUdpContext>::Recv>,
     ) -> Result<bool, Error> {
+        let _span = trace_span!("ReliableOrdered::read_packet").entered();
         if self.recv_buffer.get(sequence_id).is_some() {
             #[cfg(test)]
-            debug!("Received duplicate packet #{sequence_id} (reliable ordered)",);
+            debug!("Received duplicate packet #{sequence_id}",);
             return Ok(true);
         }
 
@@ -172,6 +173,8 @@ impl<Config: MiniUdpConfig, MaxPackets: MaxConcurrentPackets> ReliableOrderedPac
                 newest_id: newest_index,
             });
         }
+
+        trace!("Reading packet #{sequence_id} with {} msgs", messages.len());
 
         #[cfg(test)]
         assert!(self.received_packet_ids.insert(sequence_id));
@@ -199,9 +202,37 @@ impl<Config: MiniUdpConfig, MaxPackets: MaxConcurrentPackets> ReliableOrderedPac
     }
 
     fn acknowledge(&mut self, newest_received: u16, ack_bits: Self::MaxPackets) {
+        let _span = trace_span!("ReliableOrdered::acknowledge").entered();
         for i in ack_bits.iter_acknowledged() {
             let index = newest_received.wrapping_sub(i);
-            self.pending.take(index);
+            if let Some(PendingPacket { trace, .. }) = self.pending.take(index) {
+                trace!("Received ack for packet #{index}");
+                trace.update(|state| match state {
+                    ReliablePacketState::Sending {
+                        first_send,
+                        times_send,
+                    }
+                    | ReliablePacketState::SendLimitReached {
+                        first_send,
+                        times_send,
+                    } => {
+                        *state = ReliablePacketState::Acknowledged {
+                            first_send: *first_send,
+                            times_send: *times_send,
+                            ack_received: Instant::now(),
+                        }
+                    }
+                    ReliablePacketState::Constructed => {
+                        trace!("ERROR! Packet with state Constructed got acknowledged");
+                    }
+                    ReliablePacketState::Acknowledged { .. } => {
+                        trace!(
+                            "ERROR! Pending packet with state Acknowledged got acknowledged \
+                            **and removed AGAIN**"
+                        );
+                    }
+                });
+            }
         }
     }
 
@@ -294,6 +325,7 @@ impl<Config: MiniUdpConfig, MaxPackets: MaxConcurrentPackets> ReliableOrderedPac
     ) where
         Addr: SocketSendAddr,
     {
+        let _span = trace_span!("ReliableOrdered::send").entered();
         self.pending.retain(
             |id,
              PendingPacket {
@@ -336,6 +368,7 @@ impl<Config: MiniUdpConfig, MaxPackets: MaxConcurrentPackets> ReliableOrderedPac
                     ReliablePacketState::SendLimitReached { .. } => unreachable!(),
                     ReliablePacketState::Acknowledged { .. } => unreachable!(),
                 });
+                trace!("Sending packet #{id}");
                 if let Err(error) = addr.send::<Config>(
                     socket,
                     &MaxPackets::index_array_by_ringbuffer_index(&mut self.send_buffer, id)
