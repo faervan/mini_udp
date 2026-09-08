@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::prelude::*;
+use crate::{packet::ReliablePacketKind, prelude2::*};
 
 /// A helper trait used to keep the number of generic parameters for `mini_udp` types in check.
 /// You can implement it yourself or use a type alias to [`UdpContext`].
@@ -72,6 +72,7 @@ pub trait MiniUdpContext: Debug {
     type ErrorHandling: ErrorHandlingStrategy;
     /// Type defining when reliable packets should be resend.
     type ResendStrategy: ResendStrategy;
+    type ConnectionHandler: ConnectionHandler;
 }
 
 /// See the trait docs for [`MiniUdpContext`].
@@ -117,6 +118,7 @@ impl<
 
     type ErrorHandling = ErrorHandling;
     type ResendStrategy = Resend;
+    type ConnectionHandler = InsecureConnection;
 }
 
 /// Specify what to do with errors.
@@ -133,8 +135,8 @@ impl<
 /// /// and cache all errors.
 /// type ReceiverCtx = UdpContext<(), String, 2, ErrorCache>;
 ///
-/// let mut sender = UdpCommunicator::<SenderCtx>::default().connect("0.0.0.0:7100").unwrap();
-/// let mut receiver = UdpCommunicator::<ReceiverCtx>::bind("0.0.0.0:7100");
+/// let mut sender = UdpCommunicator::<SenderCtx>::default().connect("0.0.0.0:7102").unwrap();
+/// let mut receiver = UdpCommunicator::<ReceiverCtx>::bind("0.0.0.0:7102");
 ///
 /// sender.write(String::from("hello"));
 /// sender.send().unwrap();
@@ -155,7 +157,7 @@ pub trait ErrorHandlingStrategy {
 }
 
 pub mod error_handlers {
-    use crate::prelude::*;
+    use crate::prelude2::*;
 
     /// Emit an error log at [`Level::TRACE`](tracing::Level::TRACE) whenever an error occurs.
     pub struct TraceOnError;
@@ -223,11 +225,22 @@ pub mod error_handlers {
             }
         }
     }
+
+    #[cfg(test)]
+    /// For testing only.
+    pub struct PanicOnError;
+    #[cfg(test)]
+    impl ErrorHandlingStrategy for PanicOnError {
+        type Handler = ();
+        fn handle_error(_handler: &mut Self::Handler, error: Error) {
+            panic!("{error}");
+        }
+    }
 }
 
-pub trait ResendStrategy: Default {
+pub trait ResendStrategy: Debug + Default {
     /// Data stored for each packet in the send buffer.
-    type PacketContext;
+    type PacketContext: Debug;
 
     /// This method gets called whenever [`UdpCommunicator::send`] or [`MultiCommunicator::send`]
     /// are called.
@@ -235,12 +248,12 @@ pub trait ResendStrategy: Default {
     /// This method is called whenever a new packet is constructed. As the packet is not send
     /// directly, the [`PacketContext`](Self::PacketContext) should be initialized such that the
     /// first call to [`resend`](Self::resend) will return [`ResendAction::Resend`].
-    fn new_packet(&mut self, kind: ReliablePacketKind) -> Self::PacketContext;
+    fn new_packet(&mut self, kind: ReliablePacketKind, priority: Priority) -> Self::PacketContext;
     /// This method gets called for every reliable packet in the packet send buffer whenever
     /// [`UdpCommunicator::send`] or [`MultiCommunicator::send`] are called.
     /// It is used to determine if the packet should be resend at this moment, and if that resend
     /// should be the last resend.
-    fn resend(&mut self, context: &mut Self::PacketContext) -> ResendAction;
+    fn resend(&mut self, context: &mut Self::PacketContext, last_send: &Instant) -> ResendAction;
     /// When an error occurs during sending of a reliable packet, this method is called.
     fn handle_send_error<ErrorHandler>(
         &mut self,
@@ -262,8 +275,9 @@ pub enum ResendAction {
 }
 
 pub mod resend_strategies {
-    use crate::prelude::*;
+    use crate::{packet::ReliablePacketKind, prelude2::*};
 
+    #[derive(Debug)]
     /// Resend reliable packets at a fixed interval, with a fixed retry limit.
     pub struct FixedResend {
         /// Maximum amount of retries for reliable ordered packets.
@@ -281,9 +295,9 @@ pub mod resend_strategies {
         /// exceeding the [`MAX_PACKET_DATA_LEN`] - those packets are always ordered.
         pub fragmented_resend_interval: Duration,
     }
+    #[derive(Debug)]
     pub struct FixedResendPacketContext {
         remaining_retries: usize,
-        last_send: Instant,
         resend_interval: Duration,
     }
     impl FixedResend {
@@ -315,7 +329,11 @@ pub mod resend_strategies {
     }
     impl ResendStrategy for FixedResend {
         type PacketContext = FixedResendPacketContext;
-        fn new_packet(&mut self, kind: ReliablePacketKind) -> Self::PacketContext {
+        fn new_packet(
+            &mut self,
+            kind: ReliablePacketKind,
+            _priority: Priority,
+        ) -> Self::PacketContext {
             let resend_interval = match kind {
                 ReliablePacketKind::Ordered => self.ordered_resend_interval,
                 ReliablePacketKind::Unordered => self.unordered_resend_interval,
@@ -327,13 +345,15 @@ pub mod resend_strategies {
                     ReliablePacketKind::Unordered => self.max_unordered_retries,
                     ReliablePacketKind::OrderedFragment => self.max_fragmented_retries,
                 },
-                last_send: Instant::now() - resend_interval * 2,
                 resend_interval,
             }
         }
-        fn resend(&mut self, context: &mut Self::PacketContext) -> ResendAction {
-            if context.last_send.elapsed() >= context.resend_interval {
-                context.last_send = Instant::now();
+        fn resend(
+            &mut self,
+            context: &mut Self::PacketContext,
+            last_send: &Instant,
+        ) -> ResendAction {
+            if last_send.elapsed() >= context.resend_interval {
                 if context.remaining_retries > 1 {
                     context.remaining_retries -= 1;
                     ResendAction::Resend

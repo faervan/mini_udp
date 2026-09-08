@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 #[derive(Debug)]
 /// A ring buffer with a capacity of `NUM_ITEMS` items.
+/// `NUM_ITEMS` has to be a power of 2.
 pub struct RingBuffer<T, const NUM_ITEMS: usize = 32> {
     newest: u16,
     items: [Option<T>; NUM_ITEMS],
@@ -10,6 +11,166 @@ pub struct RingBuffer<T, const NUM_ITEMS: usize = 32> {
 impl<T, const NUM_ITEMS: usize> Default for RingBuffer<T, NUM_ITEMS> {
     /// `NUM_ITEMS` has to be a power of 2
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub trait RingBufferApi<T> {
+    type Iter<'a>: Iterator<Item = (u16, &'a T)>
+    where
+        T: 'a,
+        Self: 'a;
+    type IterMut<'a>: Iterator<Item = (u16, &'a mut T)>
+    where
+        T: 'a,
+        Self: 'a;
+    type IterValues<'a>: Iterator<Item = &'a T>
+    where
+        T: 'a,
+        Self: 'a;
+    type IterValuesMut<'a>: Iterator<Item = &'a mut T>
+    where
+        T: 'a,
+        Self: 'a;
+    type IterKeys<'a>: Iterator<Item = u16>
+    where
+        T: 'a,
+        Self: 'a;
+
+    fn new() -> Self;
+    fn get(&self, index: u16) -> Option<&T>;
+    fn get_mut(&mut self, index: u16) -> Option<&mut T>;
+    fn push(&mut self, item: T) -> u16;
+    fn insert(&mut self, index: u16, item: T);
+    fn take(&mut self, index: u16) -> Option<T>;
+    /// Iterate over all existing items in chronological order (oldest first).
+    fn iter(&self) -> Self::Iter<'_>;
+    /// Iterate over all existing items in chronological order (oldest first) mutably.
+    fn iter_mut(&mut self) -> Self::IterMut<'_>;
+    /// Iterate over all existing values in chronological order (oldest first).
+    fn values(&self) -> Self::IterValues<'_>;
+    /// Iterate over all existing values in chronological order (oldest first) mutably.
+    fn values_mut(&mut self) -> Self::IterValuesMut<'_>;
+    /// Iterate over the indices of all existing items in chronological order (oldest first).
+    /// The indices returned will increase, but wrap around at `u16::MAX`.
+    fn keys(&self) -> Self::IterKeys<'_>;
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all items for which `f(id, &mut v)` returns false.
+    fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(u16, &mut T) -> bool;
+    fn push_will_override(&self) -> bool;
+    fn get_newest_index(&self) -> u16;
+    fn get_next_index(&self) -> u16;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
+}
+
+impl<T, const NUM_ITEMS: usize> RingBufferApi<T> for RingBuffer<T, NUM_ITEMS> {
+    type Iter<'a>
+        = Iter<'a, T, NUM_ITEMS>
+    where
+        T: 'a,
+        Self: 'a;
+    type IterMut<'a>
+        = IterMut<'a, T, NUM_ITEMS>
+    where
+        T: 'a,
+        Self: 'a;
+    type IterValues<'a>
+        = IterValues<'a, T, NUM_ITEMS>
+    where
+        T: 'a,
+        Self: 'a;
+    type IterValuesMut<'a>
+        = IterValuesMut<'a, T, NUM_ITEMS>
+    where
+        T: 'a,
+        Self: 'a;
+    type IterKeys<'a>
+        = IterKeys<'a, T, NUM_ITEMS>
+    where
+        T: 'a,
+        Self: 'a;
+
+    #[inline(always)]
+    /// `NUM_ITEMS` has to be a power of 2
+    fn new() -> Self {
+        Self::new()
+    }
+    #[inline(always)]
+    fn get(&self, index: u16) -> Option<&T> {
+        self.get(index)
+    }
+    #[inline(always)]
+    fn get_mut(&mut self, index: u16) -> Option<&mut T> {
+        self.get_mut(index)
+    }
+    #[inline(always)]
+    fn push(&mut self, item: T) -> u16 {
+        self.push(item)
+    }
+    #[inline(always)]
+    fn insert(&mut self, index: u16, item: T) {
+        self.insert(index, item);
+    }
+    #[inline(always)]
+    fn take(&mut self, index: u16) -> Option<T> {
+        self.take(index)
+    }
+    #[inline(always)]
+    fn iter(&self) -> Self::Iter<'_> {
+        self.iter()
+    }
+    #[inline(always)]
+    fn iter_mut(&mut self) -> Self::IterMut<'_> {
+        self.iter_mut()
+    }
+    #[inline(always)]
+    fn values(&self) -> Self::IterValues<'_> {
+        self.values()
+    }
+    #[inline(always)]
+    fn values_mut(&mut self) -> Self::IterValuesMut<'_> {
+        self.values_mut()
+    }
+    #[inline(always)]
+    fn keys(&self) -> Self::IterKeys<'_> {
+        self.keys()
+    }
+    #[inline(always)]
+    fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(u16, &mut T) -> bool,
+    {
+        self.retain(f);
+    }
+    #[inline(always)]
+    fn push_will_override(&self) -> bool {
+        self.push_will_override()
+    }
+    #[inline(always)]
+    fn get_newest_index(&self) -> u16 {
+        self.get_newest_index()
+    }
+    #[inline(always)]
+    fn get_next_index(&self) -> u16 {
+        self.get_next_index()
+    }
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.len()
+    }
+    #[inline(always)]
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<T, const NUM_ITEMS: usize> RingBuffer<T, NUM_ITEMS> {
+    /// `NUM_ITEMS` has to be a power of 2
+    pub fn new() -> Self {
         if NUM_ITEMS > u16::MAX as usize {
             panic!("NUM_ITEMS has to be less than u16::MAX");
         }
@@ -20,13 +181,6 @@ impl<T, const NUM_ITEMS: usize> Default for RingBuffer<T, NUM_ITEMS> {
             newest: u16::MAX,
             items: std::array::from_fn(|_| None),
         }
-    }
-}
-
-impl<T, const NUM_ITEMS: usize> RingBuffer<T, NUM_ITEMS> {
-    /// `NUM_ITEMS` has to be a power of 2
-    pub fn new() -> Self {
-        Self::default()
     }
 
     pub fn get(&self, index: u16) -> Option<&T> {

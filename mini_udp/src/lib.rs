@@ -106,14 +106,21 @@ extern crate self as mini_udp;
 mod byte_repr;
 pub use byte_repr::{ByteRepr, ByteReprError, StaticByteRepr};
 
-pub mod communicator;
-pub mod context;
 mod error;
 pub use error::Error;
 
-pub mod packet;
-mod packet_ack;
+pub mod communicator;
+pub mod context;
+pub(crate) mod packet_ack;
+pub mod packet_old;
 pub mod prelude;
+
+pub mod com2;
+pub mod config;
+pub mod context2;
+pub mod error2;
+pub mod packet;
+pub mod prelude2;
 /// The ring buffer implementation used to cache reliably send and received packets.
 pub mod ring_buffer;
 

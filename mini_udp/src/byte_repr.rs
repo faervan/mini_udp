@@ -3,7 +3,7 @@ use std::{array::TryFromSliceError, fmt::Debug};
 use mini_udp_derive::derive_for;
 use thiserror::Error;
 
-pub trait StaticByteRepr {
+pub trait StaticByteRepr: ByteRepr {
     const BYTE_LEN: usize;
 }
 
@@ -129,7 +129,7 @@ where
 
 impl<T, const N: usize> StaticByteRepr for [T; N]
 where
-    T: StaticByteRepr,
+    T: StaticByteRepr + Default,
 {
     const BYTE_LEN: usize = T::BYTE_LEN * N;
 }

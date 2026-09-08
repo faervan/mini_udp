@@ -2,9 +2,9 @@ use crate::{prelude::*, ring_buffer::RingBuffer};
 
 #[derive(Debug, ByteRepr)]
 #[cfg_attr(test, derive(PartialEq))]
-pub(super) struct PacketAck {
+pub(crate) struct PacketAck {
     /// The id of the [`super::packet::Packet`] with which this [`PacketAck`] is send
-    pub(super) sequence_id: u16,
+    pub(crate) sequence_id: u16,
     /// The id of the most recent reliable received packet.
     reliable_newest_received: u16,
     /// Bitflags indicating which of the previous 31 reliable packets were received
@@ -15,8 +15,8 @@ pub(super) struct PacketAck {
     ordered_ack_bits: u32,
 }
 
-impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
-    pub(super) fn acknowledge(&mut self, ack: &PacketAck) {
+impl<Context: MiniUdpContext> InnerUdpCommunicator<Context> {
+    pub(crate) fn acknowledge(&mut self, ack: &PacketAck) {
         for i in 0..32 {
             if ack.reliable_ack_bits & 1 << i != 0 {
                 let index = ack.reliable_newest_received.wrapping_sub(i);
@@ -31,7 +31,7 @@ impl<CTX: MiniUdpContext> InnerUdpCommunicator<CTX> {
 }
 
 impl PacketAck {
-    pub(super) fn new<RECV: ByteRepr>(
+    pub(crate) fn new<RECV: ByteRepr>(
         sequence_id: u16,
         reliable_received: &RingBuffer<()>,
         ordered_received: &RingBuffer<Vec<RECV>>,

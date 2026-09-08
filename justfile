@@ -1,13 +1,15 @@
 expand:
 	cargo expand --lib -p mini_udp --tests
-ci:
+test:
+	cargo test
+	cargo test --all-features
+	cargo test --no-default-features
+ci: test
 	cargo +nightly fmt --check --all -- --config error_on_line_overflow=true
 	cargo doc --all-features --config build.warnings=\"deny\"
 	cargo doc --no-default-features --config build.warnings=\"deny\"
 	cargo clippy --all-targets --all-features --config build.warnings=\"deny\"
 	cargo clippy --all-targets --no-default-features --config build.warnings=\"deny\"
-	cargo test --all-features --config build.warnings=\"deny\"
-	cargo test --no-default-features --config build.warnings=\"deny\"
 publish: ci
 	#!/bin/sh
 	version=$(sed -e '1,/\[workspace.package\]/d' -e '/^version =/q' Cargo.toml | cut -d \" -f 2)

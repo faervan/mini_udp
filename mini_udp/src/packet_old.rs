@@ -85,7 +85,7 @@ impl<M: ByteRepr> Packet<M> {
 
 #[cfg(test)]
 pub mod test {
-    use crate::{packet::Packet, prelude::*, ring_buffer::RingBuffer};
+    use crate::{prelude::*, ring_buffer::RingBuffer};
 
     #[derive(ByteRepr, Debug, PartialEq, Hash, Eq, Clone, Copy)]
     pub enum InnerUdpMessage {
