@@ -83,7 +83,7 @@ where
     }
 }
 
-type MaybeMsgTrace = Option<OnceLock<Option<PacketTrace<ReliablePacketState>>>>;
+type MaybeMsgTrace = Option<MessageTracePacketUpdate<ReliablePacketState>>;
 
 #[derive(Debug)]
 /// `MaxPackets` specifies the maximum amount of packets that can be send in one direction
@@ -215,6 +215,7 @@ impl<Config: MiniUdpConfig, MaxPackets: MaxConcurrentPackets> ReliableOrderedPac
         >,
         #[cfg(any(test, feature = "debug"))] socket: &UdpCommunicatorSocket<Config::Context>,
     ) -> Result<(), Error> {
+        let _span = trace_span!("ReliableOrdered::flush_messages").entered();
         while !self.pending.push_will_override() && !self.send_queue.is_empty() {
             let mut available_bytes = MAX_PACKET_DATA_LEN;
             let mut included_msgs = 0;
@@ -237,15 +238,19 @@ impl<Config: MiniUdpConfig, MaxPackets: MaxConcurrentPackets> ReliableOrderedPac
                 );
             }
             let index = self.pending.get_next_index();
+            trace!(
+                "Constructing packet #{index} with {included_msgs} msgs at priority {priority:?}"
+            );
             let trace = PacketTrace::new(index, priority, ReliablePacketState::Constructed);
             let messages =
                 self.send_queue
                     .drain(..included_msgs)
                     .fold(vec![], |mut msgs, (m, _p, t)| {
-                        msgs.push(m);
                         if let Some(t) = t {
+                            trace!("Setting trace for {m:?}");
                             t.set(Some(trace.clone())).unwrap();
                         }
+                        msgs.push(m);
                         msgs
                     });
             let packet = Packet::<

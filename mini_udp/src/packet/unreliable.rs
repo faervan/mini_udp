@@ -7,7 +7,7 @@ pub trait UnreliablePacketHandler<Config: MiniUdpConfig>:
     fn read_packet(&mut self, messages: Vec<<Config::Context as MiniUdpContext>::Recv>);
 }
 
-type MaybeMsgTrace = Option<OnceLock<Option<PacketTrace<UnreliablePacketState>>>>;
+type MaybeMsgTrace = Option<MessageTracePacketUpdate<UnreliablePacketState>>;
 
 #[derive(Debug)]
 pub struct Unreliable<Config: MiniUdpConfig> {

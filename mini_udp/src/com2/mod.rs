@@ -241,23 +241,47 @@ impl<Config: MiniUdpConfig> CommunicatorSocket<Config::Context> for UdpCommunica
 
 #[cfg(test)]
 mod test {
+    use std::sync::atomic::{AtomicU16, Ordering};
+
     use crate::prelude2::*;
 
-    #[test]
-    fn connect() {
+    #[derive(ByteRepr, Debug)]
+    enum Msg {
+        Hello,
+        Bye,
+    }
+    type Cfg = UdpConfig<Msg, Msg, 0>;
+
+    static UDP_PORT: AtomicU16 = AtomicU16::new(7500);
+
+    fn test_init<const CONNECT: bool>() -> (UdpCommunicator<Cfg>, UdpCommunicator<Cfg>) {
         let _ = tracing_subscriber::FmtSubscriber::builder()
             .with_test_writer()
             .with_max_level(tracing::Level::TRACE)
             .try_init();
-        #[derive(ByteRepr, Debug)]
-        enum Msg {
-            Hello,
-            Bye,
-        }
-        type Cfg = UdpConfig<Msg, Msg, 0>;
-        let mut com1 = UdpCommunicator::<Cfg>::bind_with("127.0.0.1:7500", ());
-        let mut com2 = UdpCommunicator::<Cfg>::bind_with("127.0.0.1:7501", ());
+        let port = UDP_PORT.fetch_add(2, Ordering::Relaxed);
+        let mut com1 = UdpCommunicator::<Cfg>::bind_with(("127.0.0.1", port), ());
+        let mut com2 = UdpCommunicator::<Cfg>::bind_with(("127.0.0.1", port + 1), ());
 
+        if CONNECT {
+            com1.connect(com2.local_addr().unwrap()).unwrap();
+            for _ in 0..5 {
+                com1.recv();
+                com1.send().unwrap();
+                com2.recv();
+                com2.send().unwrap();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(com1.connection_state().connected());
+            assert!(com2.connection_state().connected());
+        }
+
+        (com1, com2)
+    }
+
+    #[test]
+    fn connect() {
+        let (mut com1, mut com2) = test_init::<false>();
         assert!(com1.connection_state().idle());
         com1.connect(com2.local_addr().unwrap()).unwrap();
         assert!(com1.connection_state().connecting());
@@ -275,5 +299,26 @@ mod test {
 
         assert!(com1.connection_state().connected());
         assert!(com2.connection_state().connected());
+    }
+
+    #[test]
+    fn send_ordered() {
+        let (mut com1, mut com2) = test_init::<true>();
+        assert!(com1.connection_state().connected());
+        assert!(com2.connection_state().connected());
+
+        let mut trace = com1.write_ordered(Msg::Hello).trace();
+        assert_eq!(trace.state(), MessageState::Queued);
+
+        com1.send().unwrap();
+
+        assert!(matches!(
+            trace.state(),
+            MessageState::Packeted {
+                packet_priority: Priority::Default,
+                state: ReliablePacketState::Sending { times_send: 1, .. },
+                ..
+            }
+        ));
     }
 }

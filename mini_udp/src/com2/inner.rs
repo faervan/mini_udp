@@ -35,6 +35,7 @@ impl<Config: MiniUdpConfig> InnerCommunicator<Config> {
         &mut self,
         #[cfg(any(test, feature = "debug"))] socket: &UdpCommunicatorSocket<Config::Context>,
     ) -> Result<(), Error> {
+        let _span = trace_span!("InnerCommunicator::flush_messages").entered();
         let ack = self.create_ack();
         // TODO! Flush unreliable
         // TODO! Flush reliable unordered
@@ -52,9 +53,11 @@ impl<Config: MiniUdpConfig> InnerCommunicator<Config> {
         &mut self,
         socket: &mut UdpCommunicatorSocket<Config::Context>,
     ) -> Result<(), Error> {
+        let _span = trace_span!("InnerCommunicator::send_packets").entered();
         let mut any_send = false;
 
         let Some(addr) = self.connection.send_addr() else {
+            trace!("Not connected, skipping send.");
             return Ok(());
         };
         self.reliable_ordered.send(socket, *addr, &mut any_send);

@@ -6,9 +6,12 @@ pub struct MessageTrace<PacketState> {
     inner: InnerMessageTrace<PacketState>,
 }
 
+pub(crate) type MessageTracePacketUpdate<PacketState> =
+    Arc<OnceLock<Option<PacketTrace<PacketState>>>>;
+
 enum InnerMessageTrace<PacketState> {
     Queued {
-        update: OnceLock<Option<PacketTrace<PacketState>>>,
+        update: MessageTracePacketUpdate<PacketState>,
     },
     Cancelled,
     Packeted {
@@ -16,7 +19,7 @@ enum InnerMessageTrace<PacketState> {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum MessageState<PacketState> {
     Queued,
     Cancelled,
@@ -56,7 +59,7 @@ impl<PacketState> PacketTrace<PacketState> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ReliablePacketState {
     Constructed,
     Sending {
@@ -76,8 +79,8 @@ pub enum ReliablePacketState {
 }
 
 impl<PacketState: Clone> MessageTrace<PacketState> {
-    pub(crate) fn new() -> (Self, OnceLock<Option<PacketTrace<PacketState>>>) {
-        let update = OnceLock::new();
+    pub(crate) fn new() -> (Self, MessageTracePacketUpdate<PacketState>) {
+        let update = Arc::new(OnceLock::new());
         (
             Self {
                 inner: InnerMessageTrace::Queued {
